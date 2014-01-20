@@ -56,6 +56,8 @@
 var webodfEditor = (function () {
     "use strict";
 
+    var originalUrl;
+
     runtime.currentDirectory = function () {
         return "../../webodf/lib";
     };
@@ -77,7 +79,6 @@ var webodfEditor = (function () {
 
     /**
      * extract document url from the url-fragment
-     *
      * @return {?string}
      */
     function guessDocUrl() {
@@ -171,7 +172,16 @@ var webodfEditor = (function () {
     }
 
     function save() {
-        editorInstance.saveDocument(loadedFilename);
+        editorInstance.saveDocument(loadedFilename, function(err, blob) {
+            if (err) return console.log("Error saving " + blob);
+
+            var xhr = new XMLHttpRequest();
+            xhr.upload.addEventListener("load", function() { console.log("All done"); }, false);
+            xhr.withCredentials = true;
+            xhr.upload.addEventListener("error", function(e) { console.log("Drat.", e); }, false);
+            xhr.open("POST", originalUrl);
+            xhr.send(blob);
+        });
     }
 
     /**
@@ -211,21 +221,21 @@ var webodfEditor = (function () {
         runtime.assert(args.docUrl, "docUrl needs to be specified");
         runtime.assert(editorInstance === null, "cannot boot with instanciated editor");
 
+        originalUrl = args.docUrl;
+
         require({ }, [
             "webodf/editor/Translator",
-            "webodf/editor/Editor"],
-            function (Translator, Editor) {
-                var locale = navigator.language || "en-US",
-                    t = new Translator(locale, function (editorTranslator) {
-                        runtime.setTranslator(editorTranslator.translate);
-                        editorInstance = new Editor(editorOptions);
-                        editorInstance.openDocument(args.docUrl, localMemberId, startEditing);
-                    });
-            }
-        );
+            "webodf/editor/Editor"
+        ], function (Translator, Editor) {
+            var locale = navigator.language || "en-US",
+                t = new Translator(locale, function (editorTranslator) {
+                    runtime.setTranslator(editorTranslator.translate);
+                    editorInstance = new Editor(editorOptions);
+                    editorInstance.openDocument(args.docUrl, localMemberId, startEditing);
+                });
+        });
     }
 
     // exposed API
-    return { boot: boot };
+    return { boot: boot, save: save };
 }());
-

@@ -1306,6 +1306,7 @@ runtime.loadClass("gui.AnnotationViewManager");
             // see http://techbase.kde.org/Development/Tutorials/Localization/i18n_Mistakes#Pitfall_.232:_Word_Puzzles
             element.innerHTML = runtime.tr('Loading') + ' ' + url + '...';
             element.removeAttribute('style');
+
             // open the odf container
             odfcontainer = new odf.OdfContainer(url, function (container) {
                 // assignment might be necessary if the callback

@@ -31,22 +31,24 @@
         }
     </script>
 
-    <script src="dojo-amalgamation.js" data-dojo-config="async: true"></script>
-    <link rel="stylesheet" type="text/css" href="app/resources/app.css"/>
+    <script src="/scripts/dojo-amalgamation.js" data-dojo-config="async: true"></script>
+    <link rel="stylesheet" type="text/css" href="/WebODF/programs/editor/dojo-deps/src/app/resources/app.css"/>
     <!-- dojo setup: end -->
 
     <!-- editor: start -->
-    <link rel="stylesheet" type="text/css" href="editor.css"/>
-    <script src="webodf.js" type="text/javascript" charset="utf-8"></script>
-    <script src="FileSaver.js" type="text/javascript" charset="utf-8"></script>
-    <script src="localeditor.js" type="text/javascript" charset="utf-8"></script>
+    <link rel="stylesheet" type="text/css" href="/WebODF/programs/editor/editor.css"/>
+    <script src="/WebODF/programs/editor/webodf.js" type="text/javascript" charset="utf-8"></script>
+    <script src="/WebODF/programs/editor/FileSaver.js" type="text/javascript" charset="utf-8"></script>
+    <script src="/WebODF/programs/editor/localeditor.js" type="text/javascript" charset="utf-8"></script>
     <!-- editor: end -->
   </head>
 
   <body onload="webodfEditor.boot();" class="claro">
     <div id="mainContainer">
       <div id="editor">
-        <span id="toolbar"></span>
+        <span id="toolbar">
+            <button type="button" onclick="webodfEditor.save()">Save</button>
+        </span>
         <div id="container">
           <div id="canvas"></div>
         </div>

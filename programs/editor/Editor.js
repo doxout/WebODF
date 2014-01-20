@@ -196,8 +196,8 @@ define("webodf/editor/Editor", [
             };
 
             /**
-             * @param {!string} filename
-             * @param {?function()} callback
+             * @param {string} [filename="doc.odt"]
+             * @param {function(Error,Blob?)} [callback]
              * @return {undefined}
              */
             this.saveDocument = function (filename, callback) {
@@ -212,12 +212,15 @@ define("webodf/editor/Editor", [
                         mimetype = mimebase + "spreadsheet";
                     }
                     blob = new Blob([data.buffer], {type: mimetype});
-                    saveAs(blob, filename);
+
+//                    saveAs(blob, filename);
                     //TODO: add callback as event handler to saveAs
                     fireEvent(Editor.EVENT_SAVEDTOFILE, null);
+                    if (callback) callback(null, blob, data);
                 }
                 function onerror(error) {
                     // TODO: use callback for that
+                    if (callback) callback(error);
                     alert(error);
                 }
 

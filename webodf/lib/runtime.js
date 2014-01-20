@@ -615,6 +615,7 @@ function BrowserRuntime(logoutput) {
      */
     function createXHR(path, encoding, async) {
         var xhr = new XMLHttpRequest();
+        xhr.withCredentials = true;
         xhr.open('GET', path, async);
         if (xhr.overrideMimeType) {
             if (encoding !== "binary") {
@@ -707,6 +708,7 @@ function BrowserRuntime(logoutput) {
         var xhr = new XMLHttpRequest(),
             /**@type{!string|!ArrayBuffer}*/
             d;
+        xhr.withCredentials = true;
         function handleResult() {
             if (xhr.readyState === 4) {
                 if (xhr.status === 0 && !xhr.responseText) {
@@ -754,6 +756,7 @@ function BrowserRuntime(logoutput) {
     function deleteFile(path, callback) {
         delete cache[path];
         var xhr = new XMLHttpRequest();
+        xhr.withCredentials = true;
         xhr.open('DELETE', path, true);
         xhr.onreadystatechange = function () {
             if (xhr.readyState === 4) {
@@ -773,6 +776,7 @@ function BrowserRuntime(logoutput) {
      */
     function loadXML(path, callback) {
         var xhr = new XMLHttpRequest();
+        xhr.withCredentials = true;
         function handleResult() {
             if (xhr.readyState === 4) {
                 if (xhr.status === 0 && !xhr.responseText) {
@@ -818,6 +822,7 @@ function BrowserRuntime(logoutput) {
             return;
         }
         var xhr = new XMLHttpRequest();
+        xhr.withCredentials = true;
         xhr.open("HEAD", path, true);
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== 4) {

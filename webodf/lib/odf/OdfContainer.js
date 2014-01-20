@@ -957,13 +957,22 @@ runtime.loadClass("odf.OdfNodeFilter");
          * @return {undefined}
          */
         function loadFromXML(url, callback) {
-            runtime.loadXML(url, function (err, dom) {
-                if (err) {
-                    callback(err);
-                } else {
-                    handleFlatXml(dom);
-                }
-            });
+//            runtime.loadXML(url, function (err, dom) {
+//                if (err) {
+//                    callback(err);
+//                } else {
+//                    handleFlatXml(dom);
+//                }
+//            });
+            var xmlhttp = new XMLHttpRequest();
+            xmlhttp.withCredentials = true;
+            xmlhttp.onreadystatechange = function() {
+                console.log('Content type', this.getResponseHeader('content-type'));
+            };
+            xmlhttp.open("GET", url, false);
+            xmlhttp.send();
+            var xmlDoc = xmlhttp.responseXML;
+            handleFlatXml(new DOMParser().parseFromString(xmlDoc));
         }
         // public functions
         this.setRootElement = setRootElement;
