@@ -966,9 +966,9 @@ runtime.loadClass("odf.OdfNodeFilter");
 //            });
             var xmlhttp = new XMLHttpRequest();
             xmlhttp.withCredentials = true;
-            xmlhttp.onreadystatechange = function() {
-                console.log('Content type', this.getResponseHeader('content-type'));
-            };
+//            xmlhttp.onreadystatechange = function() {
+//                console.log('Content type', this.getResponseHeader('content-type'));
+//            };
             xmlhttp.open("GET", url, false);
             xmlhttp.send();
             var xmlDoc = xmlhttp.responseXML;
