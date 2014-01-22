@@ -178,20 +178,20 @@ define("webodf/editor/Tools", [
                 zoomSlider.onToolDone = onToolDone;
 
                 // Load
-                if (loadOdtFile) {
-                    loadButton = new Button({
-                        label: tr('Open'),
-                        showLabel: false,
-                        iconClass: 'dijitIcon dijitIconFolderOpen',
-                        style: {
-                            float: 'left'
-                        },
-                        onClick: function () {
-                            loadOdtFile();
-                        }
-                    });
-                    loadButton.placeAt(toolbar);
-                }
+//                if (loadOdtFile) {
+//                    loadButton = new Button({
+//                        label: tr('Open'),
+//                        showLabel: false,
+//                        iconClass: 'dijitIcon dijitIconFolderOpen',
+//                        style: {
+//                            float: 'left'
+//                        },
+//                        onClick: function () {
+//                            loadOdtFile();
+//                        }
+//                    });
+//                    loadButton.placeAt(toolbar);
+//                }
 
                 // Save
                 if (saveOdtFile) {
