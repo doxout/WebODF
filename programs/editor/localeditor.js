@@ -175,12 +175,58 @@ var webodfEditor = (function () {
         editorInstance.saveDocument(loadedFilename, function(err, blob) {
             if (err) return console.log("Error saving " + blob);
 
-            var xhr = new XMLHttpRequest();
-            xhr.upload.addEventListener("load", function() { console.log("All done"); }, false);
-            xhr.withCredentials = true;
-            xhr.upload.addEventListener("error", function(e) { console.log("Drat.", e); }, false);
-            xhr.open("POST", originalUrl);
-            xhr.send(blob);
+            // TODO prompt for tag
+            // Approach 3: not exactly sure how to get the data from this or how to use a submit event.
+            require([
+                "dijit/Dialog",
+                "dijit/form/Form",
+                "dijit/form/TextBox",
+                "dijit/form/Button",
+                "dojo/domReady!"
+            ], function(Dialog, Form, TextBox, Button) {
+                var form = new Form();
+
+                var textBox = new TextBox({
+                    name: "tag",
+                    placeHolder: "Enter a tag for this version"
+                }).placeAt(form.containerNode);
+
+                new Button({
+                    label: "OK",
+                    onClick: function() {
+                        postWithTag(textBox.get('value'));
+                        dia.hide();
+                    }
+                }).placeAt(form.containerNode);
+                new Button({ label: "Cancel", onClick: function() { dia.hide(); } }).placeAt(form.containerNode);
+
+                var dia = new Dialog({
+                    content: form,
+                    title: "Save version",
+                    style: "width: 400px; height: 200px;"
+                });
+                form.startup();
+                dia.show();
+            });
+
+            /**
+             * Posts to the original URL, includes a tag in the query string.
+             * @param {String} tag the tag to include.
+             */
+            function postWithTag(tag) {
+                var postUrl = originalUrl;
+                if (tag && (tag.length > 0)) {
+                    postUrl += (originalUrl.indexOf('?') != -1) ? '&' : '?';
+                    postUrl += "tag=" + tag;
+                }
+
+                var xhr = new XMLHttpRequest();
+                xhr.upload.addEventListener("load", function() { console.log("All done"); }, false);
+                xhr.withCredentials = true;
+                xhr.upload.addEventListener("error", function(e) { console.log("Drat.", e); }, false);
+                xhr.open("POST", postUrl);
+                xhr.send(blob);
+            }
         });
     }
 
