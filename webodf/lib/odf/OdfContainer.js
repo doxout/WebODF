@@ -964,15 +964,37 @@ runtime.loadClass("odf.OdfNodeFilter");
 //                    handleFlatXml(dom);
 //                }
 //            });
-            var xmlhttp = new XMLHttpRequest();
-            xmlhttp.withCredentials = true;
+            getAndParse(url, { 404: function() {
+//                var parts = url.split(".");
+//                getAndParse("/doc-templates/blank." + parts[parts.length - 1].split("?")[0], {});
+                callback(404);
+            }});
+
+//            var xmlhttp = new XMLHttpRequest();
+//            xmlhttp.withCredentials = true;
 //            xmlhttp.onreadystatechange = function() {
-//                console.log('Content type', this.getResponseHeader('content-type'));
+//                if (xmlhttp.status == 404) {
+//                    console.log("404");
+//                }
 //            };
-            xmlhttp.open("GET", url, false);
-            xmlhttp.send();
-            var xmlDoc = xmlhttp.responseXML;
-            handleFlatXml(new DOMParser().parseFromString(xmlDoc));
+//            xmlhttp.open("GET", url, false);
+//            xmlhttp.send();
+//            var xmlDoc = xmlhttp.responseXML;
+//            handleFlatXml(new DOMParser().parseFromString(xmlDoc));
+
+            function getAndParse(url, statusHandlers) {
+                var xmlhttp = new XMLHttpRequest();
+                xmlhttp.withCredentials = true;
+                xmlhttp.onreadystatechange = function() {
+                    if (statusHandlers[xmlhttp.status]) statusHandlers[xmlhttp.status]();
+                };
+                xmlhttp.open("GET", url, false);
+                xmlhttp.send();
+                var xmlDoc = xmlhttp.responseXML;
+                console.log(xmlDoc);
+                try { handleFlatXml(new DOMParser().parseFromString(xmlDoc)); }
+                catch(e) { console.log("Couldn't parse doc", e); }
+            }
         }
         // public functions
         this.setRootElement = setRootElement;
@@ -1222,11 +1244,20 @@ runtime.loadClass("odf.OdfNodeFilter");
 
         // initialize private variables
         if (url) {
+            loadAsZip(url);
+        } else {
+            zip = createEmptyTextDocument();
+        }
+
+        function loadAsZip(url) {
             zip = new core.Zip(url, function (err, zipobject) {
                 zip = zipobject;
                 if (err) {
                     loadFromXML(url, function (xmlerr) {
-                        if (err) {
+                        if (xmlerr === 404) {
+                            var parts = url.split(".");
+                            loadAsZip("/doc-templates/blank." + parts[parts.length - 1].split("?")[0]);
+                        } else if (err) {
                             zip.error = err + "\n" + xmlerr;
                             setState(OdfContainer.INVALID);
                         }
@@ -1235,8 +1266,6 @@ runtime.loadClass("odf.OdfNodeFilter");
                     loadComponents();
                 }
             });
-        } else {
-            zip = createEmptyTextDocument();
         }
     };
     odf.OdfContainer.EMPTY = 0;

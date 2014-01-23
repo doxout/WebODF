@@ -175,8 +175,6 @@ var webodfEditor = (function () {
         editorInstance.saveDocument(loadedFilename, function(err, blob) {
             if (err) return console.log("Error saving " + blob);
 
-            // TODO prompt for tag
-            // Approach 3: not exactly sure how to get the data from this or how to use a submit event.
             require([
                 "dijit/Dialog",
                 "dijit/form/Form",
