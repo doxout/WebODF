@@ -176,12 +176,13 @@ var webodfEditor = (function () {
             if (err) return console.log("Error saving " + blob);
 
             require([
+                "dojox/widget/Standby",
                 "dijit/Dialog",
                 "dijit/form/Form",
                 "dijit/form/TextBox",
                 "dijit/form/Button",
                 "dojo/domReady!"
-            ], function(Dialog, Form, TextBox, Button) {
+            ], function(Standby, Dialog, Form, TextBox, Button) {
                 var form = new Form();
 
                 var textBox = new TextBox({
@@ -192,6 +193,7 @@ var webodfEditor = (function () {
                 new Button({
                     label: "OK",
                     onClick: function() {
+                        standby.show();
                         postWithTag(textBox.get('value'));
                         dia.hide();
                     }
@@ -203,28 +205,41 @@ var webodfEditor = (function () {
                     title: "Save version",
                     style: "width: 400px; height: 200px;"
                 });
+                var standby = new Standby({ target: dia.domNode });
                 form.startup();
                 dia.show();
-            });
 
-            /**
-             * Posts to the original URL, includes a tag in the query string.
-             * @param {String} tag the tag to include.
-             */
-            function postWithTag(tag) {
-                var postUrl = originalUrl;
-                if (tag && (tag.length > 0)) {
-                    postUrl += (originalUrl.indexOf('?') != -1) ? '&' : '?';
-                    postUrl += "tag=" + tag;
+
+                /**
+                 * Posts to the original URL, includes a tag in the query string.
+                 * @param {String} tag the tag to include.
+                 */
+                function postWithTag(tag) {
+                    var postUrl = originalUrl;
+                    if (tag && (tag.length > 0)) {
+                        postUrl += (originalUrl.indexOf('?') != -1) ? '&' : '?';
+                        postUrl += "tag=" + tag;
+                    }
+
+                    var xhr = new XMLHttpRequest();
+                    xhr.upload.addEventListener("load", function() {
+                        standby.hide();
+                        console.log("All done");
+                    }, false);
+                    xhr.withCredentials = true;
+                    xhr.upload.addEventListener("error", function(e) {
+                        standby.hide();
+                        console.log("Drat.", e);
+                        new Dialog({
+                            content: "Error saving file: " + e.toString(),
+                            title: "Error",
+                            style: "width: 400px; height: 200px;"
+                        }).show();
+                    }, false);
+                    xhr.open("POST", postUrl);
+                    xhr.send(blob);
                 }
-
-                var xhr = new XMLHttpRequest();
-                xhr.upload.addEventListener("load", function() { console.log("All done"); }, false);
-                xhr.withCredentials = true;
-                xhr.upload.addEventListener("error", function(e) { console.log("Drat.", e); }, false);
-                xhr.open("POST", postUrl);
-                xhr.send(blob);
-            }
+            });
         });
     }
 
