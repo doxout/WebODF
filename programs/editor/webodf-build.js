@@ -1,0 +1,1 @@
+var xhr=new XMLHttpRequest,code;xhr.open("GET","../WebODF/webodf/lib/runtime.js",!1),xhr.send(null),code=xhr.responseText,code+="\n//# sourceURL=../WebODF/webodf/lib/runtime.js",code+="\n//@ sourceURL=../WebODF/webodf/lib/runtime.js",eval(code),define("webodf",function(){});
