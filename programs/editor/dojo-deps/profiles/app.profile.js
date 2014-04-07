@@ -93,6 +93,7 @@ var profile = {
 				"dijit/form/NumberSpinner",
 				"dijit/form/CheckBox",
 				"dojox/widget/ColorPicker",
+                "dojox/widget/Standby",
 				"dijit/form/DropDownButton",
 				"dijit/TooltipDialog"
 			],

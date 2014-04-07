@@ -187,7 +187,7 @@ var webodfEditor = (function () {
 
                 var textBox = new TextBox({
                     name: "tag",
-                    placeHolder: "Enter a tag for this version"
+                    placeHolder: "Enter a tag for this version"                            h
                 }).placeAt(form.containerNode);
 
                 new Button({
