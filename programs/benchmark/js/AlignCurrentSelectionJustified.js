@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright (C) 2013 KO GmbH <copyright@kogmbh.com>
+ * Copyright (C) 2014 KO GmbH <copyright@kogmbh.com>
  *
  * @licstart
  * The JavaScript code in this page is free software: you can redistribute it
@@ -36,35 +36,32 @@
  * @source: https://github.com/kogmbh/WebODF/
  */
 
-define(function() {
+define(["BenchmarkAction"], function(BenchmarkAction) {
     "use strict";
 
     /**
+     * Align the current selection 'justify'
      * @constructor
      */
-    function ManualStep() {
-        var wizardContainer = document.getElementById("wizardPrompt"),
-            messageContainer = document.getElementById("wizardMessage"),
-            doneButton = document.getElementById("wizardClose");
+    function AlignCurrentSelectionJustified() {
+        var state = {description: "Align the current selection 'justify'"},
+            action = new BenchmarkAction(state);
+
+        this.subscribe = action.subscribe;
+        this.state = state;
 
         /**
-         * @param {!string} message
-         * @param {!function()} onDone
+         * @param {!OdfBenchmarkContext} context
+         * @return {undefined}
          */
-        this.requestAction = function(message, onDone) {
-            while (messageContainer.firstChild) {
-                messageContainer.removeChild(messageContainer.firstChild);
-            }
-            messageContainer.appendChild(document.createTextNode(message));
-
-            doneButton.onclick = function() {
-                wizardContainer.style.display = "none";
-                onDone();
-            };
-
-            wizardContainer.style.display = "block";
-        };
+        this.start = function(context) {
+            context.recordDistanceFromCurrentSelection(state);
+            action.start();
+            context.sessionController.getDirectFormattingController().alignParagraphJustified();
+            action.stop();
+            action.complete(true);
+        }
     }
 
-    return ManualStep;
+    return AlignCurrentSelectionJustified;
 });

@@ -38,7 +38,6 @@
 
 /*global runtime, core, gui, ops*/
 
-runtime.loadClass("gui.Caret");
 
 /**
  * The caret manager is responsible for creating a caret as UI representation
@@ -47,6 +46,7 @@ runtime.loadClass("gui.Caret");
  * caret's current focus, and ensure the caret stays visible after every local
  * operation.
  * @constructor
+ * @implements {core.Destroyable}
  * @param {!gui.SessionController} sessionController
  */
 gui.CaretManager = function CaretManager(sessionController) {
@@ -75,21 +75,17 @@ gui.CaretManager = function CaretManager(sessionController) {
     }
 
     /**
-     * @return {!Element}
-     */
-    function getCanvasElement() {
-        return sessionController.getSession().getOdtDocument().getOdfCanvas().getElement();
-    }
-
-    /**
      * @param {!string} memberId
      * @return {undefined}
      */
     function removeCaret(memberId) {
-        if (memberId === sessionController.getInputMemberId()) {
-            getCanvasElement().removeAttribute("tabindex");
+        var caret = carets[memberId];
+        if (caret) {
+            /*jslint emptyblock:true*/
+            caret.destroy(function() {});
+            /*jslint emptyblock:false*/
+            delete carets[memberId];
         }
-        delete carets[memberId];
     }
 
     /**
@@ -131,7 +127,7 @@ gui.CaretManager = function CaretManager(sessionController) {
     }
 
     /**
-     * @param {!Object} info
+     * @param {!{memberId:string}} info
      * @return {undefined}
      */
     function ensureLocalCaretVisible(info) {
@@ -189,7 +185,8 @@ gui.CaretManager = function CaretManager(sessionController) {
      */
     this.registerCursor = function (cursor, caretAvatarInitiallyVisible, blinkOnRangeSelect) {
         var memberid = cursor.getMemberId(),
-            caret = new gui.Caret(cursor, caretAvatarInitiallyVisible, blinkOnRangeSelect);
+            caret = new gui.Caret(cursor, caretAvatarInitiallyVisible, blinkOnRangeSelect),
+            eventManager = sessionController.getEventManager();
 
         carets[memberid] = caret;
 
@@ -199,8 +196,8 @@ gui.CaretManager = function CaretManager(sessionController) {
 
             // wire up the cursor update to caret visibility update
             cursor.subscribe(ops.OdtCursor.signalCursorUpdated, scheduleCaretVisibilityCheck);
-            // Pass event focus to the session controller
-            sessionController.getEventManager().focus();
+            // Add event trap as an overlay element to the caret
+            caret.setOverlayElement(eventManager.getEventTrap());
         } else {
             cursor.subscribe(ops.OdtCursor.signalCursorUpdated, caret.handleUpdate);
         }
@@ -215,7 +212,7 @@ gui.CaretManager = function CaretManager(sessionController) {
     this.getCaret = getCaret;
 
     /**
-     * @returns {!Array.<!gui.Caret>}
+     * @return {!Array.<!gui.Caret>}
      */
     this.getCarets = getCarets;
 
@@ -226,32 +223,20 @@ gui.CaretManager = function CaretManager(sessionController) {
     this.destroy = function (callback) {
         var odtDocument = sessionController.getSession().getOdtDocument(),
             eventManager = sessionController.getEventManager(),
-            caretArray = getCarets();
+            caretCleanup = getCarets().map(function(caret) { return caret.destroy; });
 
         runtime.clearTimeout(ensureCaretVisibleTimeoutId);
         odtDocument.unsubscribe(ops.OdtDocument.signalParagraphChanged, ensureLocalCaretVisible);
-        odtDocument.unsubscribe(ops.OdtDocument.signalCursorMoved, refreshLocalCaretBlinking);
-        odtDocument.unsubscribe(ops.OdtDocument.signalCursorRemoved, removeCaret);
+        odtDocument.unsubscribe(ops.Document.signalCursorMoved, refreshLocalCaretBlinking);
+        odtDocument.unsubscribe(ops.Document.signalCursorRemoved, removeCaret);
 
         eventManager.unsubscribe("focus", focusLocalCaret);
         eventManager.unsubscribe("blur", blurLocalCaret);
         window.removeEventListener("focus", showLocalCaret, false);
         window.removeEventListener("blur", hideLocalCaret, false);
 
-        (function destroyCaret(i, err) {
-            if (err) {
-                callback(err);
-            } else {
-                if (i < caretArray.length) {
-                    caretArray[i].destroy(function (err) {
-                        destroyCaret(i + 1, err);
-                    });
-                } else {
-                    callback();
-                }
-            }
-        }(0, undefined));
         carets = {};
+        core.Async.destroyAll(caretCleanup, callback);
     };
 
     function init() {
@@ -259,8 +244,8 @@ gui.CaretManager = function CaretManager(sessionController) {
             eventManager = sessionController.getEventManager();
 
         odtDocument.subscribe(ops.OdtDocument.signalParagraphChanged, ensureLocalCaretVisible);
-        odtDocument.subscribe(ops.OdtDocument.signalCursorMoved, refreshLocalCaretBlinking);
-        odtDocument.subscribe(ops.OdtDocument.signalCursorRemoved, removeCaret);
+        odtDocument.subscribe(ops.Document.signalCursorMoved, refreshLocalCaretBlinking);
+        odtDocument.subscribe(ops.Document.signalCursorRemoved, removeCaret);
 
         eventManager.subscribe("focus", focusLocalCaret);
         eventManager.subscribe("blur", blurLocalCaret);

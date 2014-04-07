@@ -33,9 +33,7 @@
  * @source: http://www.webodf.org/
  * @source: https://github.com/kogmbh/WebODF/
  */
-/*global Node, runtime, core, gui, ops, odf, xmldom*/
-runtime.loadClass("odf.Namespaces");
-runtime.loadClass("xmldom.LSSerializer");
+/*global Node, NodeFilter, runtime, core, gui, ops, odf, xmldom*/
 
 /**
  * @constructor
@@ -145,8 +143,35 @@ ops.OperationTests = function OperationTests(runner) {
         }
         return true;
     }
+
+    /**
+     * Returns true if the specified node is an empty text node
+     * @param {!Node} node
+     * @return {!number}
+     */
+    function emptyNodes(node) {
+        if (node.nodeType === Node.TEXT_NODE && node.length === 0) {
+            return NodeFilter.FILTER_ACCEPT;
+        }
+        return NodeFilter.FILTER_REJECT;
+    }
+
+    /**
+     * Check that there are no empty text nodes in the supplied rootElement
+     * @param {!Node} rootElement
+     * @return {undefined}
+     */
+    function checkForEmptyTextNodes(rootElement) {
+        var walker = rootElement.ownerDocument.createTreeWalker(rootElement, NodeFilter.SHOW_TEXT, emptyNodes, false),
+            node;
+        node = walker.nextNode();
+        if (node) {
+            r.testFailed("Empty text nodes were found");
+        }
+    }
     function parseTest(name, node) {
         var hasSetup = node.getAttribute("hasSetup") === "true",
+            isFailing = node.getAttribute("isFailing") === "true",
             before = node.firstElementChild,
             opsElement = before.nextElementSibling,
             after = opsElement.nextElementSibling,
@@ -171,6 +196,7 @@ ops.OperationTests = function OperationTests(runner) {
             runtime.assert(Boolean(setup), "Required setup for " + name + " was not found.");
         }
         return {
+            isFailing: isFailing,
             setup : setup,
             before: before,
             ops: ops,
@@ -263,8 +289,9 @@ ops.OperationTests = function OperationTests(runner) {
             op = factory.create(test.ops[i]);
             op.execute(t.odtDocument);
             if (metabefore) {
-                t.odtDocument.emit(ops.OdtDocument.signalOperationExecuted, op);
+                t.odtDocument.emit(ops.OdtDocument.signalOperationEnd, op);
             }
+            checkForEmptyTextNodes(t.odtDocument.getCanvas().getElement());
         }
 
         // check result
@@ -334,7 +361,7 @@ ops.OperationTests = function OperationTests(runner) {
         var f = function () {
             runTest(test);
         };
-        return {f: f, name: name};
+        return {f: f, name: name, expectFail: test.isFailing};
     }
 
     function makeTestsIntoFunction(tests) {
@@ -373,18 +400,18 @@ ops.OperationTests = function OperationTests(runner) {
     }
 
     this.setUp = function () {
-        var testarea;
+        var testarea, properties;
         t = {};
         testarea = core.UnitTest.provideTestAreaDiv();
         t.odfcanvas = new odf.OdfCanvas(testarea);
         t.odfContainer = new odf.OdfContainer("", null);
         t.odfcanvas.setOdfContainer(t.odfContainer);
         t.odtDocument = new ops.OdtDocument(t.odfcanvas);
-        t.odtDocument.addMember(new ops.Member('Alice', {
-            color: "black",
-            fullName: "Alice",
-            imageUrl: ""
-        }));
+        properties = new ops.MemberProperties();
+        properties.color = "black";
+        properties.fullName = "Alice";
+        properties.imageUrl = "";
+        t.odtDocument.addMember(new ops.Member('Alice', properties));
     };
     this.tearDown = function () {
         t.odfcanvas.destroy(function () { return; });
@@ -406,20 +433,46 @@ ops.OperationTests = function OperationTests(runner) {
         ];
     };
 
+    /*jslint emptyblock: true*/
     this.setUps = {
         "ApplyDirectStyling_FixesCursorPositions" : function () {
             // Test specifically requires the cursor node to have a child element of some sort to
             // reproduce an issue where the cursor ends up in an invalid position after the operation
             function appendToCursor(cursor) {
-                cursor.getNode().appendChild(t.odtDocument.getDOM().createElement("span"));
+                cursor.getNode().appendChild(t.odtDocument.getDOMDocument().createElement("span"));
             }
 
             return {
-                setUp: function () {t.odtDocument.subscribe(ops.OdtDocument.signalCursorAdded, appendToCursor); },
-                tearDown: function () {t.odtDocument.unsubscribe(ops.OdtDocument.signalCursorAdded, appendToCursor); }
+                setUp: function () {t.odtDocument.subscribe(ops.Document.signalCursorAdded, appendToCursor); },
+                tearDown: function () {t.odtDocument.unsubscribe(ops.Document.signalCursorAdded, appendToCursor); }
+            };
+        },
+        "RemoveAnnotation_ranged" : function () {
+            return {
+                setUp: function () {
+                    var rootElement = t.odfContainer.rootElement,
+                        annotation = rootElement.getElementsByTagNameNS(odf.Namespaces.officens, "annotation")[0],
+                        annotationEnd = rootElement.getElementsByTagNameNS(odf.Namespaces.officens, "annotation-end")[0];
+                    annotation.annotationEndElement = annotationEnd;
+                },
+                tearDown: function () {}
+            };
+        },
+        "RemoveText_CopesWithEmptyTextNodes" : function () {
+            return {
+                setUp: function () {
+                    var rootElement = t.odfContainer.rootElement,
+                        doc = rootElement.ownerDocument,
+                        paddedElement = doc.getElementById("paddedByEmptyTextNodes");
+
+                    paddedElement.insertBefore(doc.createTextNode(""), paddedElement.firstChild);
+                    paddedElement.appendChild(doc.createTextNode(""));
+                },
+                tearDown: function () {}
             };
         }
     };
+    /*jslint emptyblock: false*/
 };
 ops.OperationTests.prototype.description = function () {
     "use strict";

@@ -73,6 +73,30 @@ gui.KeyboardHandler = function KeyboardHandler() {
         if (!modifiers) {
             modifiers = modifier.None;
         }
+        // When a modifier key is pressed on it's own, different browsers + platforms
+        // may report the state of the corresponding modifier flag as trailing the event.
+        // For example, pressing the ctrl key in FF on Linux will report (ctrlKey:false)
+        // in the keydown event, while Chrome on Linux will report (ctrlKey:true) in the
+        // keydown event.
+        //
+        // Easiest way to cope with this is to manually normalize these events.
+        switch (keyCode) {
+            case gui.KeyboardHandler.KeyCode.LeftMeta:
+            case gui.KeyboardHandler.KeyCode.RightMeta:
+            case gui.KeyboardHandler.KeyCode.MetaInMozilla:
+                modifiers |= modifier.Meta;
+                break;
+            case gui.KeyboardHandler.KeyCode.Ctrl:
+                modifiers |= modifier.Ctrl;
+                break;
+            case gui.KeyboardHandler.KeyCode.Alt:
+                modifiers |= modifier.Alt;
+                break;
+            case gui.KeyboardHandler.KeyCode.Shift:
+                modifiers |= modifier.Shift;
+                break;
+        }
+
         return keyCode + ':' + modifiers;
     }
 
@@ -84,13 +108,19 @@ gui.KeyboardHandler = function KeyboardHandler() {
     };
 
     /**
+     * Bind to the specified keycode + modifiers. To bind directly to one of the modifiers, simply
+     * pass in the modifier as the keyCode (e.g., Keycode.Ctrl), and set the modifiers to Modifier.None.
+     * This class will take care of binding to the appropriate modifiers to ensure the keybinding works as
+     * expected.
+     *
      * @param {!number}     keyCode
      * @param {!number}     modifiers
      * @param {!Function}   callback
+     * @param {boolean=}   overwrite    Set to true to force a binding to be overwritten
      */
-    this.bind = function (keyCode, modifiers, callback) {
+    this.bind = function (keyCode, modifiers, callback, overwrite) {
         var keyCombo = getKeyCombo(keyCode, modifiers);
-        runtime.assert(bindings.hasOwnProperty(keyCombo) === false,
+        runtime.assert(overwrite || bindings.hasOwnProperty(keyCombo) === false,
             "tried to overwrite the callback handler of key combo: " + keyCombo);
         bindings[keyCombo] = callback;
     };
@@ -156,7 +186,9 @@ gui.KeyboardHandler.KeyCode = {
     Tab: 9,
     Clear: 12,
     Enter: 13,
+    Shift: 16,
     Ctrl: 17,
+    Alt: 18,
     End: 35,
     Home: 36,
     Left: 37,
@@ -191,6 +223,7 @@ gui.KeyboardHandler.KeyCode = {
     Y: 89,
     Z: 90,
     LeftMeta: 91,
+    RightMeta: 93,
     MetaInMozilla: 224
 };
 

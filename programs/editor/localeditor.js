@@ -187,7 +187,7 @@ var webodfEditor = (function () {
 
                 var textBox = new TextBox({
                     name: "tag",
-                    placeHolder: "Enter a tag for this version"                            h
+                    placeHolder: "Enter a tag for this version"
                 }).placeAt(form.containerNode);
 
                 new Button({
@@ -245,7 +245,6 @@ var webodfEditor = (function () {
 
     /**
      * make a guess about the document (# in URL)
-     * also guess about local/collaborative (depending on nowjs)
      *
      * @param {?Object} args
      *
@@ -284,15 +283,22 @@ var webodfEditor = (function () {
 
         require({ }, [
             "webodf/editor/Translator",
-            "webodf/editor/Editor"
-        ], function (Translator, Editor) {
-            var locale = navigator.language || "en-US",
-                t = new Translator(locale, function (editorTranslator) {
-                    runtime.setTranslator(editorTranslator.translate);
-                    editorInstance = new Editor(editorOptions);
-                    editorInstance.openDocument(args.docUrl, localMemberId, startEditing);
-                });
-        });
+            "webodf/editor/Editor"],
+            function (Translator, Editor) {
+                var locale = navigator.language || "en-US",
+                    editorBase = dojo.config && dojo.config.paths && dojo.config.paths["webodf/editor"],
+                    translationsDir = '/translations',
+                    t;
+
+                    runtime.assert(editorBase, "webodf/editor path not defined in dojoConfig");
+
+                    t = new Translator(editorBase + translationsDir, locale, function (editorTranslator) {
+                        runtime.setTranslator(editorTranslator.translate);
+                        editorInstance = new Editor("mainContainer", editorOptions);
+                        editorInstance.openDocument(args.docUrl, localMemberId, startEditing);
+                    });
+            }
+        );
     }
 
     // exposed API

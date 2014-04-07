@@ -33,8 +33,7 @@
  * @source: http://www.webodf.org/
  * @source: https://github.com/kogmbh/WebODF/
  */
-/*global core, runtime*/
-runtime.loadClass("core.DomUtils");
+/*global core, runtime, NodeFilter*/
 
 /**
  * @constructor
@@ -58,6 +57,31 @@ core.DomUtilsTests = function DomUtilsTests(runner) {
         t = {};
         core.UnitTest.cleanupTestAreaDiv();
     };
+
+    function ignoreSpans(node) {
+        return node.localName === "span" ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+    }
+
+    /**
+     * Add the specified HTML nodes to the test area's div
+     * @param {!string} html XML html string
+     * @return {undefined}
+     */
+    function createNodes(html) {
+        var /**@type{!string}*/
+            xmlDoc = "<?xml version='1.0' encoding='UTF-8'?>",
+            doc;
+
+        xmlDoc += "<div xmlns='http://www.w3.org/1999/xhtml'>";
+        xmlDoc += html;
+        xmlDoc += "</div>";
+
+        doc = runtime.parseXML(xmlDoc);
+        document.importNode(doc.firstChild, true);
+        while (doc.firstChild.firstChild) {
+            t.doc.appendChild(doc.firstChild.firstChild);
+        }
+    }
 
     function normalizeTextNodes_TextWithTextSilblings() {
         t.doc.appendChild(document.createTextNode("a"));
@@ -529,6 +553,101 @@ core.DomUtilsTests = function DomUtilsTests(runner) {
         r.shouldBe(t, "t.parent.firstChild.childNodes[2].firstChild.textContent", "'test'");
     }
 
+    function getNodesInRange_EndContainerSkippedByFilter_CompletesIteration() {
+        var range = document.createRange();
+        createNodes("before<span/>middle<span/>after");
+
+        range.setStart(t.doc.childNodes[0], 0);
+        range.setEnd(t.doc.childNodes[3], 0);
+
+        t.nodes = t.utils.getNodesInRange(range, ignoreSpans, NodeFilter.SHOW_ALL);
+
+        r.shouldBe(t, "t.nodes.shift()", "t.doc.childNodes[0]");
+        r.shouldBe(t, "t.nodes.shift()", "t.doc.childNodes[2]");
+        r.shouldBe(t, "t.nodes.shift()", "undefined");
+        range.detach();
+    }
+
+    function getNodesInRange_NodeStartToNodeEnd_ReturnsNode() {
+        var range = document.createRange();
+        createNodes("before<span/>middle<span/>after");
+
+        range.setStart(t.doc.childNodes[0], 0);
+        range.setEnd(t.doc.childNodes[0], t.doc.childNodes[0].length);
+
+        t.nodes = t.utils.getNodesInRange(range, ignoreSpans, NodeFilter.SHOW_ALL);
+
+        r.shouldBe(t, "t.nodes.shift()", "t.doc.childNodes[0]");
+        r.shouldBe(t, "t.nodes.shift()", "undefined");
+        range.detach();
+    }
+
+    function getNodesInRange_NodeEndToNodeStart_ReturnsTouchedNode() {
+        var range = document.createRange();
+        createNodes("before<span/>middle<span/>after");
+
+        range.setStart(t.doc.childNodes[0], t.doc.childNodes[0].length);
+        range.setEnd(t.doc.childNodes[4], 0);
+
+        t.nodes = t.utils.getNodesInRange(range, ignoreSpans, NodeFilter.SHOW_ALL);
+
+        r.shouldBe(t, "t.nodes.shift()", "t.doc.childNodes[2]");
+        r.shouldBe(t, "t.nodes.shift()", "t.doc.childNodes[4]");
+        r.shouldBe(t, "t.nodes.shift()", "undefined");
+        range.detach();
+    }
+
+    function getNodesInRange_NodeEndToNodeEnd_ReturnsBracketedNode() {
+        var range = document.createRange();
+        createNodes("before<span/>middle<span>ignored</span>after");
+
+        range.setStart(t.doc.childNodes[0], t.doc.childNodes[0].length);
+        range.setEnd(t.doc.childNodes[3], 1);
+
+        t.nodes = t.utils.getNodesInRange(range, ignoreSpans, NodeFilter.SHOW_ALL);
+
+        r.shouldBe(t, "t.nodes.shift()", "t.doc.childNodes[2]");
+        r.shouldBe(t, "t.nodes.shift()", "undefined");
+        range.detach();
+    }
+
+    function getNodesInRange_StartsOnRejectedNode_IgnoresChildNodes() {
+        var range = document.createRange();
+        createNodes("<span>ignored</span>after");
+
+        range.setStart(t.doc, 0);
+        range.setEnd(t.doc, t.doc.childNodes.length);
+
+        t.nodes = t.utils.getNodesInRange(range, ignoreSpans, NodeFilter.SHOW_ALL);
+
+        r.shouldBe(t, "t.nodes.shift()", "t.doc.childNodes[1]");
+        r.shouldBe(t, "t.nodes.shift()", "undefined");
+        range.detach();
+    }
+
+    function getNodesInRange_StartsInRejectedNode_IgnoresChildNodes() {
+        var range = document.createRange();
+        createNodes("<span><div>ignored</div></span>after");
+
+        range.setStart(t.doc.firstChild, 0);
+        range.setEnd(t.doc, t.doc.childNodes.length);
+
+        t.nodes = t.utils.getNodesInRange(range, ignoreSpans, NodeFilter.SHOW_ALL);
+
+        r.shouldBe(t, "t.nodes.shift()", "t.doc.childNodes[1]");
+        r.shouldBe(t, "t.nodes.shift()", "undefined");
+        range.detach();
+    }
+
+    function mapObjOntoNode_EmptyObject() {
+        t.node = document.createElement("span");
+
+        t.utils.mapObjOntoNode(t.node, {"prefix:empty-obj":{}}, function(prefix) { return prefix; });
+
+        r.shouldBe(t, "t.node.hasAttributeNS('prefix','empty-obj')", "false");
+        r.shouldBe(t, "t.node.getElementsByTagNameNS('prefix','empty-obj').length", "0");
+    }
+
     this.tests = function () {
         return r.name([
             normalizeTextNodes_TextWithTextSilblings,
@@ -560,7 +679,16 @@ core.DomUtilsTests = function DomUtilsTests(runner) {
             rangeIntersectsRange_RightTouch_ReturnsTrue,
 
             removeUnwantedNodes_DiscardAll,
-            removeUnwantedNodes_DiscardSpanOnly
+            removeUnwantedNodes_DiscardSpanOnly,
+
+            getNodesInRange_EndContainerSkippedByFilter_CompletesIteration,
+            getNodesInRange_NodeStartToNodeEnd_ReturnsNode,
+            getNodesInRange_NodeEndToNodeStart_ReturnsTouchedNode,
+            getNodesInRange_NodeEndToNodeEnd_ReturnsBracketedNode,
+            getNodesInRange_StartsOnRejectedNode_IgnoresChildNodes,
+            getNodesInRange_StartsInRejectedNode_IgnoresChildNodes,
+
+            mapObjOntoNode_EmptyObject
         ]);
     };
     this.asyncTests = function () {

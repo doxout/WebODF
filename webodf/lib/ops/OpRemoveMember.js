@@ -25,7 +25,6 @@
 
 /*global ops, runtime*/
 
-runtime.loadClass("ops.Member");
 
 /**
  * @constructor
@@ -36,24 +35,35 @@ ops.OpRemoveMember = function OpRemoveMember() {
 
     var memberid, timestamp;
 
+    /**
+     * @param {!ops.OpRemoveMember.InitSpec} data
+     */
     this.init = function (data) {
         memberid = data.memberid;
         timestamp = parseInt(data.timestamp, 10);
     };
 
     this.isEdit = false;
+    this.group = undefined;
 
-    this.execute = function (odtDocument) {
+    /**
+     * @param {!ops.Document} document
+     */
+    this.execute = function (document) {
+        var odtDocument = /**@type{ops.OdtDocument}*/(document);
         if (!odtDocument.getMember(memberid)) {
             return false;
         }
 
         odtDocument.removeMember(memberid);
-        odtDocument.emit(ops.OdtDocument.signalMemberRemoved, memberid);
+        odtDocument.emit(ops.Document.signalMemberRemoved, memberid);
 
         return true;
     };
 
+    /**
+     * @return {!ops.OpRemoveMember.Spec}
+     */
     this.spec = function () {
         return {
             optype: "RemoveMember",
@@ -62,3 +72,14 @@ ops.OpRemoveMember = function OpRemoveMember() {
         };
     };
 };
+/**@typedef{{
+    optype:string,
+    memberid:string,
+    timestamp:number
+}}*/
+ops.OpRemoveMember.Spec;
+/**@typedef{{
+    memberid:string,
+    timestamp:(number|undefined)
+}}*/
+ops.OpRemoveMember.InitSpec;

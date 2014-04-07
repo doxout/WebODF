@@ -38,12 +38,13 @@
 
 /*global Node, NodeFilter, runtime, core, gui, odf*/
 
-runtime.loadClass("core.Cursor");
-runtime.loadClass("core.DomUtils");
-runtime.loadClass("core.PositionIterator");
-runtime.loadClass("core.PositionFilter");
-runtime.loadClass("core.LoopWatchDog");
-runtime.loadClass("odf.OdfUtils");
+/**@typedef{{
+  convertForwardStepsBetweenFilters:function(number,!core.PositionFilter,!core.PositionFilter):number,
+  convertBackwardStepsBetweenFilters:function(number,!core.PositionFilter,!core.PositionFilter):number,
+  countLinesSteps:function(number,!core.PositionFilter):number,
+  countStepsToLineBoundary:function(number,!core.PositionFilter):number
+}}*/
+gui.StepCounter;
 
 /**
  * This class modifies the selection in different ways.
@@ -54,11 +55,8 @@ runtime.loadClass("odf.OdfUtils");
 gui.SelectionMover = function SelectionMover(cursor, rootNode) {
     "use strict";
     var odfUtils = new odf.OdfUtils(),
-        domUtils = new core.DomUtils(),
         /**@type{!core.PositionIterator}*/
         positionIterator,
-        cachedXOffset,
-        timeoutHandle,
         /**@const*/
         FILTER_ACCEPT = core.PositionFilter.FilterResult.FILTER_ACCEPT;
 
@@ -81,7 +79,7 @@ gui.SelectionMover = function SelectionMover(cursor, rootNode) {
      * Gets the maximum available offset for a given node. For a text node, this
      * is text length, for element nodes, this will be childNodes.length
      * @param {!Node} node
-     * @returns {!number}
+     * @return {!number}
      */
     function getMaximumNodePosition(node) {
         return node.nodeType === Node.TEXT_NODE ? node.textContent.length : node.childNodes.length;
@@ -93,7 +91,7 @@ gui.SelectionMover = function SelectionMover(cursor, rootNode) {
      * the last available rectangle
      * @param {ClientRectList} clientRectangles
      * @param {!boolean} useRightEdge
-     * @returns {?{top: !number, left: !number, bottom: !number}}
+     * @return {?{top: !number, left: !number, bottom: !number}}
      */
     function getClientRect(clientRectangles, useRightEdge) {
         var rectangle,
@@ -177,132 +175,6 @@ gui.SelectionMover = function SelectionMover(cursor, rootNode) {
     }
 
     /**
-     * @param {!number} positions
-     * @param {!boolean} extend
-     * @param {!function():boolean} move
-     * @returns {!number} Number of positions successfully moved. Will be less than the requested
-     * number if there are not enough positions available in the specified direction
-     */
-    function doMove(positions, extend, move) {
-        var left = positions,
-            iterator = getIteratorAtCursor(),
-            initialRect,
-            range = /**@type{!Range}*/(rootNode.ownerDocument.createRange()),
-            selectionRange = cursor.getSelectedRange().cloneRange(),
-            newRect,
-            horizontalMovement,
-            o,
-            c,
-            isForwardSelection;
-
-        initialRect = getVisibleRect(iterator.container(), iterator.unfilteredDomOffset(), range);
-        while (left > 0 && move()) {
-            left -= 1;
-        }
-
-        if (extend) {
-            c = iterator.container();
-            o = iterator.unfilteredDomOffset();
-            if (domUtils.comparePoints(/**@type{!Node}*/(selectionRange.startContainer), selectionRange.startOffset, c, o) === -1) {
-                selectionRange.setStart(c, o);
-                isForwardSelection = false;
-            } else {
-                selectionRange.setEnd(c, o);
-            }
-        } else {
-            selectionRange.setStart(iterator.container(), iterator.unfilteredDomOffset());
-            selectionRange.collapse(true);
-        }
-        cursor.setSelectedRange(selectionRange, isForwardSelection);
-
-        iterator = getIteratorAtCursor(); // Need to get the first walkable position at the cursor
-        // The cursor node itself is not a walkable position, and will cause strange behaviours if used
-        newRect = getVisibleRect(iterator.container(), iterator.unfilteredDomOffset(), range);
-
-        horizontalMovement = (newRect.top === initialRect.top) ? true : false;
-        if (horizontalMovement || cachedXOffset === undefined) {
-            cachedXOffset = newRect.left;
-        }
-        runtime.clearTimeout(timeoutHandle);
-        timeoutHandle = runtime.setTimeout(function () {
-            cachedXOffset = undefined;
-        }, 2000);
-
-        range.detach();
-        return positions - left;
-    }
-    /**
-     * Move selection forward the requested number of positions.
-     * @param {!number} positions
-     * @param {boolean=} extend true if range is to be expanded from the current
-     *                         point
-     * @returns {!number} Number of positions successfully moved. Will be less than the requested
-     * number if there are not enough positions available in the specified direction
-     **/
-    this.movePointForward = function (positions, extend) {
-        return doMove(positions, extend || false, positionIterator.nextPosition);
-    };
-    /**
-     * Move selection backward the requested number of positions.
-     * @param {!number} positions
-     * @param {boolean=} extend true if range is to be expanded from the current
-     *                         point
-     * @returns {!number} Number of positions successfully moved. Will be less than the requested
-     * number if there are not enough positions available in the specified direction
-     **/
-    this.movePointBackward = function (positions, extend) {
-        return doMove(positions, extend || false, positionIterator.previousPosition);
-    };
-
-    /**
-     * Returns if the current position is walkable according to the
-     * specified filter. Useful when the position becomes unwalkable after, for example,
-     * text removal.
-     * @param {!core.PositionFilter} filter
-     * @return {boolean}
-     */
-    function isPositionWalkable(filter) {
-        var iterator = getIteratorAtCursor();
-
-        if (filter.acceptPosition(iterator) === FILTER_ACCEPT) {
-            iterator.setUnfilteredPosition(cursor.getAnchorNode(), 0);
-            if (filter.acceptPosition(iterator) === FILTER_ACCEPT) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Returns the number of positions the given (step, filter) pair is
-     * equivalent to in unfiltered space.
-     * @param {!core.PositionIterator} iterator
-     * @param {!number} steps
-     * @param {!core.PositionFilter} filter
-     * @return {!number} Number of positions required to move the requested number of filtered steps
-     */
-    function countSteps(iterator, steps, filter) {
-        var watch = new core.LoopWatchDog(10000),
-            positions = 0,
-            positionsCount = 0,
-            increment = steps >= 0 ? 1 : -1,
-            delegate = /**@type {!function():boolean}*/(steps >= 0 ? iterator.nextPosition : iterator.previousPosition);
-
-        // TODO rewrite to use StepsTranslator
-        while (steps !== 0 && delegate()) {
-            watch.check();
-            positionsCount += increment;
-            if (filter.acceptPosition(iterator) === FILTER_ACCEPT) {
-                steps -= increment;
-                positions += positionsCount;
-                positionsCount = 0;
-            }
-        }
-
-        return positions;
-    }
-
-    /**
      * Returns the number of positions to the right the (steps, filter1) pair
      * is equivalent to in filter2 space.
      * @param {!number} stepsFilter1 Number of filter1 steps to count
@@ -356,44 +228,6 @@ gui.SelectionMover = function SelectionMover(cursor, rootNode) {
     }
 
     /**
-     * Return the number of positions moved to pass the requested number of filtered steps.
-     * The return value is always greater than or equal to the number of filtered steps, as
-     * each position can be at most one step (and it may take multiple positions to reach the
-     * next accepted step)
-     * @param {!number} steps
-     * @param {!core.PositionFilter} filter
-     * @return {!number} Number of positions required to move the requested number of filtered steps
-     */
-    function countStepsPublic(steps, filter) {
-        var iterator = getIteratorAtCursor();
-        return countSteps(iterator, steps, filter);
-    }
-
-    /**
-     * Finds the most appropriate valid position to move the cursor to. Attempts to keep
-     * the cursor within the same paragraph, so that cursors near the front or end of a paragraph do not
-     * incorrectly jump to the next or previous paragraph.
-     * @param {!Node} container
-     * @param {!number} offset
-     * @param {!core.PositionFilter} filter
-     * @returns {!number} positions Number of positions to the nearest step
-     */
-    function countPositionsToClosestStep(container, offset, filter) {
-        var iterator = getIteratorAtCursor(),
-            paragraphNode = odfUtils.getParagraphElement(iterator.getCurrentNode()),
-            count = 0;
-
-        iterator.setUnfilteredPosition(container, offset);
-        if (filter.acceptPosition(iterator) !== FILTER_ACCEPT) {
-            count = countSteps(iterator, -1, filter);
-            if (count === 0 || (paragraphNode && paragraphNode !== odfUtils.getParagraphElement(iterator.getCurrentNode()))) {
-                iterator.setUnfilteredPosition(container, offset);
-                count = countSteps(iterator, 1, filter);
-            }
-        }
-        return count;
-    }
-    /**
      * Return the number of steps needed to move across one line in the specified direction.
      * If it is not possible to move across one line, then 0 is returned.
      *
@@ -421,11 +255,7 @@ gui.SelectionMover = function SelectionMover(cursor, rootNode) {
         rect = getVisibleRect(c, iterator.unfilteredDomOffset(), range);
 
         top = rect.top;
-        if (cachedXOffset === undefined) {
-            left = rect.left;
-        } else {
-            left = cachedXOffset;
-        }
+        left = rect.left;
         lastTop = top;
 
         while ((direction < 0 ? iterator.previousPosition() : iterator.nextPosition()) === true) {
@@ -536,95 +366,16 @@ gui.SelectionMover = function SelectionMover(cursor, rootNode) {
         range.detach();
         return steps;
     }
+
     /**
-     * Returns the position difference between the cursor and the supplied point (element + offset). Note, this is NOT
-     * the same as the number of valid positions between the cursor and supplied point.
-     * Computationally, this is equivalent to: (# steps from root to point) - (# steps from root to cursor)
-     *
-     * Example scenario:
-     *      <p>|A|B|<span>C|D|</span></p>
-     * Assuming the cursor is at the 4th vertical bar (position = 3, just after C), countStepsToPosition(span, 0)
-     * should return 1. If it returns 0, consumers would incorrectly assume that the cursor is at the same position
-     * as the passed in point. This is clearly not the case as can be seen by counting from the start of the
-     * document to each point. The span starts at position 2, meaning there is actually 1 step difference
-     * between the cursor and the supplied point
-     *
-     * @param {!Node} targetNode    Target node to iterate to
-     * @param {!number} targetOffset  offset in unfiltered DOM world
-     * @param {!core.PositionFilter} filter
-     * @return {!number} steps
+     * @return {!gui.StepCounter}
      */
-    function countStepsToPosition(targetNode, targetOffset, filter) {
-        runtime.assert(targetNode !== null, "SelectionMover.countStepsToPosition called with element===null");
-        // first figure out how to get to the element
-        // really dumb/inefficient implementation
-        var iterator = getIteratorAtCursor(),
-            c = iterator.container(),
-            o = iterator.unfilteredDomOffset(),
-            steps = 0,
-            watch = new core.LoopWatchDog(10000),
-            comparison;
-
-        // TODO rewrite to use StepsTranslator
-        // the iterator may interpret the positions as given by the range
-        // differently than the dom positions, so we normalize them by calling
-        // setPosition with these values
-        iterator.setUnfilteredPosition(targetNode, targetOffset);
-        // The below counting logic relies on the iterators initially being in accepted positions.
-        // This is achieved by rewinding both the iterator and the cursor back to the last acceptable position
-        // before, or equal to, the requested the point.
-        // Failure to do this rewinding will result in the counting results being off-by-one occasionally when counting backwards
-        while (filter.acceptPosition(iterator) !== FILTER_ACCEPT && iterator.previousPosition()) {
-            watch.check();
-        }
-        targetNode = iterator.container();
-        runtime.assert(Boolean(targetNode), "SelectionMover.countStepsToPosition: positionIterator.container() returned null");
-        targetOffset = iterator.unfilteredDomOffset();
-
-        iterator.setUnfilteredPosition(c, o);
-        // See previous comment on rewinding. This prevents off-by-one when counting in reverse
-        while (filter.acceptPosition(iterator) !== FILTER_ACCEPT && iterator.previousPosition()) {
-            watch.check();
-        }
-
-        comparison = domUtils.comparePoints(targetNode, targetOffset, iterator.container(), iterator.unfilteredDomOffset());
-        if (comparison < 0) {
-            while (iterator.nextPosition()) {
-                watch.check();
-                if (filter.acceptPosition(iterator) === FILTER_ACCEPT) {
-                    steps += 1;
-                }
-                if (iterator.container() === targetNode && iterator.unfilteredDomOffset() === targetOffset) {
-                    return steps;
-                }
-            }
-        } else if (comparison > 0) {
-            while (iterator.previousPosition()) {
-                watch.check();
-                if (filter.acceptPosition(iterator) === FILTER_ACCEPT) {
-                    steps -= 1;
-                    // Every point from the root node to the *first* valid position is effectively position = 0
-                    // Therefore, when counting steps backwards we need to count to the earliest position preceding (or equal)
-                    // to the supplied point
-                    if (iterator.container() === targetNode && iterator.unfilteredDomOffset() === targetOffset) {
-                        break;
-                    }
-                }
-            }
-        }
-        return steps;
-    }
-
     this.getStepCounter = function () {
         return {
-            countSteps: countStepsPublic,
             convertForwardStepsBetweenFilters: convertForwardStepsBetweenFilters,
             convertBackwardStepsBetweenFilters: convertBackwardStepsBetweenFilters,
             countLinesSteps: countLinesSteps,
-            countStepsToLineBoundary: countStepsToLineBoundary,
-            countStepsToPosition: countStepsToPosition,
-            isPositionWalkable: isPositionWalkable,
-            countPositionsToNearestStep: countPositionsToClosestStep
+            countStepsToLineBoundary: countStepsToLineBoundary
         };
     };
     function init() {

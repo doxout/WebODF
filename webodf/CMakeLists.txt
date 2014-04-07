@@ -8,42 +8,38 @@ configure_file(webodfversion.js.in ${CMAKE_CURRENT_BINARY_DIR}/webodfversion.js)
 
 set(TESTJSFILES tests/core/ZipTests.js
     tests/core/Base64Tests.js
-    tests/core/DomUtilsTests.js
     tests/core/CursorTests.js
+    tests/core/DomUtilsTests.js
     tests/core/PositionIteratorTests.js
     tests/core/RuntimeTests.js
-    tests/gui/UndoStateRulesTests.js
+    tests/core/StepIteratorTests.js
+    tests/gui/SelectionControllerTests.js
+    tests/gui/StyleSummaryTests.js
     tests/gui/TrivialUndoManagerTests.js
-    tests/gui/SelectionMoverTests.js
-    tests/gui/StyleHelperTests.js
-    tests/odf/OdfUtilsTests.js
-    tests/odf/ObjectNameGeneratorTests.js
+    tests/gui/UndoStateRulesTests.js
     tests/odf/FormattingTests.js
+    tests/odf/LayoutTests.js
+    tests/odf/ObjectNameGeneratorTests.js
     tests/odf/OdfContainerTests.js
+    tests/odf/OdfUtilsTests.js
     tests/odf/StyleInfoTests.js
     tests/odf/TextStyleApplicatorTests.js
-    tests/ops/OdtCursorTests.js
     tests/ops/OdtDocumentTests.js
     tests/ops/OperationTests.js
-    tests/ops/TransformerTests.js
-    tests/ops/TransformationTests.js
     tests/ops/SessionTests.js
     tests/ops/StepsTranslatorTests.js
+    tests/ops/TransformationTests.js
+    tests/ops/TransformerTests.js
     tests/xmldom/LSSerializerTests.js
     tests/xmldom/XPathTests.js
     tests/tests.js
 )
 
-add_custom_command(
-    OUTPUT manifest.json
+add_custom_target(manifest.json-target
     COMMAND ${NODE}
-    ARGS lib/runtime.js tools/updateJS.js
-    COMMAND ${CMAKE_COMMAND} ARGS -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/lib/manifest.json ${CMAKE_CURRENT_BINARY_DIR}/manifest.json
-    DEPENDS NodeJS tools/updateJS.js ${LIBJSFILES} ${TESTJSFILES}
+    lib/runtime.js tools/updateJS.js ${CMAKE_BINARY_DIR}/jsfileslist.txt
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
-
-add_custom_target(manifest.json-target DEPENDS manifest.json)
 
 add_custom_command(
     OUTPUT webodf.css.js
@@ -55,21 +51,15 @@ add_custom_command(
 add_custom_target(webodf.css.js-target DEPENDS webodf.css.js)
 
 if (Java_JAVA_EXECUTABLE)
+  # Windows has a command-line limit of around 8,000 chars, soCC flags are passed into the compiler using a file to help
+  # keep the length of the compilation command as small as possible.
+  file (WRITE ${CMAKE_CURRENT_BINARY_DIR}/cc-flags.txt "--warning_level VERBOSE --jscomp_error accessControls --jscomp_error ambiguousFunctionDecl --jscomp_error checkEventfulObjectDisposal --jscomp_error checkRegExp --jscomp_error checkStructDictInheritance --jscomp_error checkTypes --jscomp_error checkVars --jscomp_error const --jscomp_error constantProperty --jscomp_error deprecated --jscomp_error duplicateMessage --jscomp_error es3 --jscomp_error es5Strict --jscomp_error externsValidation --jscomp_error fileoverviewTags --jscomp_error globalThis --jscomp_error invalidCasts --jscomp_error misplacedTypeAnnotation --jscomp_error missingProperties --jscomp_error missingProvide --jscomp_error missingRequire --jscomp_error missingReturn --jscomp_off nonStandardJsDocs --jscomp_error suspiciousCode --jscomp_error strictModuleDepCheck --jscomp_error typeInvalidation --jscomp_error undefinedNames --jscomp_error undefinedVars --jscomp_error unknownDefines --jscomp_error uselessCode --jscomp_error visibility --summary_detail_level 3")
   # nonStandardJsDocs is not used because we use @licstart @licend and @source
   # ideally we would enable --jscomp_error reportUnknownTypes
-  set(SHARED_CLOSURE_ARGS --warning_level VERBOSE --jscomp_error accessControls --jscomp_error ambiguousFunctionDecl --jscomp_error checkEventfulObjectDisposal --jscomp_error checkRegExp --jscomp_error checkStructDictInheritance --jscomp_error checkTypes --jscomp_error checkVars --jscomp_error const --jscomp_error constantProperty --jscomp_error deprecated --jscomp_error duplicateMessage --jscomp_error es3 --jscomp_error es5Strict --jscomp_error externsValidation --jscomp_error fileoverviewTags --jscomp_error globalThis --jscomp_error invalidCasts --jscomp_error misplacedTypeAnnotation --jscomp_error missingProperties --jscomp_error missingProvide --jscomp_error missingRequire --jscomp_error missingReturn --jscomp_off nonStandardJsDocs --jscomp_error suspiciousCode --jscomp_error strictModuleDepCheck --jscomp_error typeInvalidation --jscomp_error undefinedNames --jscomp_error undefinedVars --jscomp_error unknownDefines --jscomp_error uselessCode --jscomp_error visibility --summary_detail_level 3)
+  # -XX:+TieredCompilation reduces compilation time by about 30%
+  set(SHARED_CLOSURE_ARGS -XX:+TieredCompilation -jar ${CLOSURE_JAR} --flagfile ${CMAKE_CURRENT_BINARY_DIR}/cc-flags.txt)
 
-  foreach(JSFILE ${TYPEDLIBJSFILES})
-    if (IS_ABSOLUTE ${JSFILE})
-      set(TYPED_LIB_CLOSURE_ARGS ${TYPED_LIB_CLOSURE_ARGS}
-          --js ${JSFILE})
-    else (IS_ABSOLUTE ${JSFILE})
-      set(TYPED_LIB_CLOSURE_ARGS ${TYPED_LIB_CLOSURE_ARGS}
-          --js ${CMAKE_CURRENT_SOURCE_DIR}/${JSFILE})
-    endif (IS_ABSOLUTE ${JSFILE})
-  endforeach(JSFILE ${TYPEDLIBJSFILES})
-
-  foreach(JSFILE ${UNTYPEDLIBJSFILES})
+  foreach(JSFILE ${LIBJSFILES})
     if (IS_ABSOLUTE ${JSFILE})
       set(LIB_CLOSURE_ARGS ${LIB_CLOSURE_ARGS}
           --js ${JSFILE})
@@ -77,8 +67,7 @@ if (Java_JAVA_EXECUTABLE)
       set(LIB_CLOSURE_ARGS ${LIB_CLOSURE_ARGS}
           --js ${CMAKE_CURRENT_SOURCE_DIR}/${JSFILE})
     endif (IS_ABSOLUTE ${JSFILE})
-  endforeach(JSFILE ${UNTYPEDLIBJSFILES})
-  set(LIB_CLOSURE_ARGS ${TYPED_LIB_CLOSURE_ARGS} ${LIB_CLOSURE_ARGS})
+  endforeach(JSFILE ${LIBJSFILES})
 
   foreach(JSFILE ${TESTJSFILES})
     set(TEST_CLOSURE_ARGS ${TEST_CLOSURE_ARGS}
@@ -91,8 +80,7 @@ if (Java_JAVA_EXECUTABLE)
   add_custom_command(
       OUTPUT simplecompiled.js
       COMMAND ${Java_JAVA_EXECUTABLE}
-      ARGS -jar ${CLOSURE_JAR}
-         ${SHARED_CLOSURE_ARGS} ${LIB_CLOSURE_ARGS} ${TEST_CLOSURE_ARGS}
+      ARGS ${SHARED_CLOSURE_ARGS} ${LIB_CLOSURE_ARGS} ${TEST_CLOSURE_ARGS}
          --compilation_level WHITESPACE_ONLY
          --formatting PRETTY_PRINT
          --js_output_file simplecompiled.js-
@@ -107,9 +95,8 @@ if (Java_JAVA_EXECUTABLE)
   add_custom_command(
       OUTPUT compiled.js
       COMMAND ${Java_JAVA_EXECUTABLE}
-      ARGS -jar ${CLOSURE_JAR}
+      ARGS ${SHARED_CLOSURE_ARGS} ${LIB_CLOSURE_ARGS} ${TEST_CLOSURE_ARGS}
          --define IS_COMPILED_CODE=true
-         ${SHARED_CLOSURE_ARGS} ${LIB_CLOSURE_ARGS} ${TEST_CLOSURE_ARGS}
          --compilation_level ADVANCED_OPTIMIZATIONS
          --formatting PRETTY_PRINT
          --externs ${CMAKE_CURRENT_SOURCE_DIR}/tools/externs.js
@@ -123,9 +110,9 @@ if (Java_JAVA_EXECUTABLE)
   add_custom_command(
       OUTPUT webodf.js
       COMMAND ${Java_JAVA_EXECUTABLE}
-      ARGS -jar ${CLOSURE_JAR}
+      ARGS ${SHARED_CLOSURE_ARGS} ${LIB_CLOSURE_ARGS}
+         --jscomp_error reportUnknownTypes
          --define IS_COMPILED_CODE=true
-         ${SHARED_CLOSURE_ARGS} ${LIB_CLOSURE_ARGS}
          --compilation_level SIMPLE_OPTIMIZATIONS
          --formatting PRINT_INPUT_DELIMITER
          --externs ${CMAKE_CURRENT_SOURCE_DIR}/tools/externs.js
@@ -136,30 +123,12 @@ if (Java_JAVA_EXECUTABLE)
   )
   add_custom_target(webodf.js-target DEPENDS webodf.js)
 
-  # check types on the js files that are listed in TYPEDLIBJSFILES
-  add_custom_command(
-      OUTPUT typecheck.js
-      COMMAND ${Java_JAVA_EXECUTABLE}
-      ARGS -jar ${CLOSURE_JAR}
-         --define IS_COMPILED_CODE=true --js webodf.css.js
-         ${SHARED_CLOSURE_ARGS} ${TYPED_LIB_CLOSURE_ARGS}
-         --jscomp_error reportUnknownTypes
-         --compilation_level ADVANCED_OPTIMIZATIONS
-         --formatting PRETTY_PRINT
-         --externs ${CMAKE_CURRENT_SOURCE_DIR}/tools/externs.js
-         --js_output_file typecheck.js-
-      COMMAND ${CMAKE_COMMAND} ARGS -E rename typecheck.js- typecheck.js
-      DEPENDS ClosureCompiler ${LIBJSFILES} tools/externs.js
-         webodf.css.js-target
-  )
-  add_custom_target(typecheck-target DEPENDS typecheck.js)
-
   add_custom_command(
       OUTPUT webodf-debug.js
       COMMAND ${Java_JAVA_EXECUTABLE}
-      ARGS -jar ${CLOSURE_JAR}
+      ARGS ${SHARED_CLOSURE_ARGS} ${LIB_CLOSURE_ARGS}
+         --jscomp_error reportUnknownTypes
          --define IS_COMPILED_CODE=true
-         ${SHARED_CLOSURE_ARGS} ${LIB_CLOSURE_ARGS}
          --compilation_level WHITESPACE_ONLY
          --formatting PRETTY_PRINT
          --externs ${CMAKE_CURRENT_SOURCE_DIR}/tools/externs.js
@@ -167,13 +136,13 @@ if (Java_JAVA_EXECUTABLE)
       # in WHITESPACE_ONLY mode, it is not possible to define IS_COMPILED_CODE
       # so the value for IS_COMPILED_CODE is set by find and replace in the code
       COMMAND ${CMAKE_COMMAND} -DFILENAME:STRING="${CMAKE_CURRENT_BINARY_DIR}/webodf-debug.js" -P ${CMAKE_CURRENT_SOURCE_DIR}/tools/set_IS_COMPILED_CODE.cmake
-      DEPENDS ClosureCompiler ${TYPEDLIBJSFILES} tools/externs.js
+      DEPENDS ClosureCompiler ${LIBJSFILES} tools/externs.js
           webodf.css.js-target
   )
   add_custom_target(webodf-debug.js-target DEPENDS webodf-debug.js)
 
   add_custom_target(syntaxcheck ALL
-      DEPENDS typecheck-target simplecompiled.js-target webodf.js-target
+      DEPENDS simplecompiled.js-target webodf.js-target
           compiled.js-target
   )
 
@@ -217,7 +186,7 @@ if (NOT APPLE)
              ${CMAKE_CURRENT_BINARY_DIR}/instrumented
         DEPENDS ${LIBJSFILES} JSCoverage
     )
-    add_custom_target(instrumented ALL DEPENDS instrumented/index.html)
+    add_custom_target(instrumented DEPENDS instrumented/index.html)
 endif(NOT APPLE)
 
 add_subdirectory(tests)

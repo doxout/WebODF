@@ -33,7 +33,7 @@
  * @source: http://www.webodf.org/
  * @source: https://github.com/kogmbh/WebODF/
  */
-/*global Packages, HTMLStyleElement, window, XMLHttpRequest, HTMLStyleElement, Document, NodeFilter, Range*/
+/*global Packages, HTMLStyleElement, window, XMLHttpRequest, HTMLStyleElement, Document, HTMLDocument, NodeFilter, Range*/
 /*jslint nomen: false, emptyblock: true, unparam: true */
 /**
  * @constructor
@@ -639,3 +639,26 @@ function TextEvent() { "use strict"; }
  * @type {!string}
  */
 TextEvent.prototype.data;
+/**
+ * @type {?HTMLScriptElement}
+ */
+HTMLDocument.prototype.currentScript;
+/**
+ * @type {?Element}
+ */
+Document.prototype.activeElement;
+/**
+ * @param {number} x
+ * @param {number} y
+ * @return {Range}
+ */
+Document.prototype.caretRangeFromPoint = function (x, y) {"use strict"; };
+
+/**
+ * Legacy event handler for older versions of IE.
+ * See http://msdn.microsoft.com/en-us/library/ie/ms536411%28v=vs.85%29.aspx
+ * @param {!string} event
+ * @param {!Function} func
+ * @return {undefined}
+ */
+Element.prototype.detachEvent = function(event, func) { "use strict"; };

@@ -35,7 +35,8 @@
  * @source: http://www.webodf.org/
  * @source: https://github.com/kogmbh/WebODF/
  */
-/*global ops*/
+/*global ops, runtime, core*/
+
 
 /*
  * route the operations.
@@ -52,8 +53,15 @@
 ops.TrivialOperationRouter = function TrivialOperationRouter() {
     "use strict";
 
-    var operationFactory,
-        playbackFunction;
+    var events = new core.EventNotifier([
+            ops.OperationRouter.signalProcessingBatchStart,
+            ops.OperationRouter.signalProcessingBatchEnd
+        ]),
+        /**@type{!ops.OperationFactory}*/
+        operationFactory,
+        playbackFunction,
+        /**@type{number}*/
+        groupIdentifier = 0;
 
     /**
      * Sets the factory to use to create operation instances from operation specs.
@@ -82,18 +90,31 @@ ops.TrivialOperationRouter = function TrivialOperationRouter() {
      * @return {undefined}
      */
     this.push = function (operations) {
-        operations.forEach(function(op) {
-            var timedOp,
+        // This is an extremely simplistic and VERY temporary implementation of operation grouping.
+        // In order to improve undo behaviour, the undo manager requires knowledge about what groups
+        // of operations were queued together, so these can be stored in a single undo state.
+        // The current implementation is only designed for a localeditor instance & the TrivialUndoManager.
+        // TODO redesign this concept to work with collaborative editing
+        groupIdentifier += 1;
+        events.emit(ops.OperationRouter.signalProcessingBatchStart, {});
+        operations.forEach(function (op) {
+            var /**@type{?ops.Operation}*/
+                timedOp,
                 opspec = op.spec();
 
             opspec.timestamp = (new Date()).getTime();
             timedOp = operationFactory.create(opspec);
+            timedOp.group = "g" + groupIdentifier;
 
             // TODO: handle return flag in error case
             playbackFunction(timedOp);
         });
+        events.emit(ops.OperationRouter.signalProcessingBatchEnd, {});
     };
 
+    /**
+     * @param {function()} cb
+     */
     this.close = function (cb) {
         cb();
     };
@@ -103,20 +124,18 @@ ops.TrivialOperationRouter = function TrivialOperationRouter() {
      * @param {!Function} cb
      * @return {undefined}
      */
-    /*jslint emptyblock: true, unparam: true*/
     this.subscribe = function (eventId, cb) {
+        events.subscribe(eventId, cb);
     };
-    /*jslint emptyblock: false, unparam: false*/
 
     /**
      * @param {!string} eventId
      * @param {!Function} cb
      * @return {undefined}
      */
-    /*jslint emptyblock: true, unparam: true*/
     this.unsubscribe = function (eventId, cb) {
+        events.unsubscribe(eventId, cb);
     };
-    /*jslint emptyblock: false, unparam: false*/
 
     /**
      * @return {!boolean}

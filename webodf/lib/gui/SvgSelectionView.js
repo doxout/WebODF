@@ -35,37 +35,44 @@
  */
 /*global Node, NodeFilter, gui, odf, ops, runtime, core*/
 
-runtime.loadClass("core.DomUtils");
-runtime.loadClass("odf.OdfUtils");
-runtime.loadClass("odf.OdfNodeFilter");
-runtime.loadClass("gui.SelectionMover");
 
 /**
  *  A GUI class that attaches to a cursor and renders it's selection
  *  as an SVG polygon.
  * @constructor
- * @implements gui.SelectionView
+ * @implements {core.Destroyable}
+ * @implements {gui.SelectionView}
  * @param {!ops.OdtCursor} cursor
  */
 gui.SvgSelectionView = function SvgSelectionView(cursor) {
     "use strict";
 
-    var odtDocument = cursor.getOdtDocument(),
+    var /**@type{!ops.Document}*/
+        document = cursor.getDocument(),
         documentRoot, // initialized by addOverlay
-        /**@type{!Element}*/
-        root, // initialized by addOverlays
-        doc = odtDocument.getDOM(),
+        /**@type{!HTMLElement}*/
+        sizer,
+        doc = document.getDOMDocument(),
         svgns = "http://www.w3.org/2000/svg",
         overlay = doc.createElementNS(svgns, 'svg'),
         polygon = doc.createElementNS(svgns, 'polygon'),
+        handle1 = doc.createElementNS(svgns, 'circle'),
+        handle2 = doc.createElementNS(svgns, 'circle'),
         odfUtils = new odf.OdfUtils(),
         domUtils = new core.DomUtils(),
+        /**@type{!gui.ZoomHelper}*/
+        zoomHelper = document.getCanvas().getZoomHelper(),
+        /**@type{boolean}*/
         isVisible = true,
-        positionIterator = gui.SelectionMover.createPositionIterator(odtDocument.getRootNode()),
+        positionIterator = gui.SelectionMover.createPositionIterator(document.getRootNode()),
         /**@const*/
         FILTER_ACCEPT = NodeFilter.FILTER_ACCEPT,
         /**@const*/
-        FILTER_REJECT = NodeFilter.FILTER_REJECT;
+        FILTER_REJECT = NodeFilter.FILTER_REJECT,
+        /**@const*/
+        HANDLE_RADIUS = 8,
+        /**@type{!core.ScheduledTask}*/
+        renderTask;
 
     /**
      * This evil little check is necessary because someone, not mentioning any names *cough*
@@ -76,28 +83,22 @@ gui.SvgSelectionView = function SvgSelectionView(cursor) {
      * to cope with it for now.
      */
     function addOverlay() {
-        var newDocumentRoot = odtDocument.getRootNode();
+        var newDocumentRoot = document.getRootNode();
         if (documentRoot !== newDocumentRoot) {
             documentRoot = newDocumentRoot;
-            root = /**@type{!Element}*/(documentRoot.parentNode.parentNode.parentNode);
-            root.appendChild(overlay);
-            overlay.setAttribute('class', 'selectionOverlay');
+            sizer = document.getCanvas().getSizer();
+            sizer.appendChild(overlay);
+            overlay.setAttribute('class', 'webodf-selectionOverlay');
+            handle1.setAttribute('class', 'webodf-draggable');
+            handle2.setAttribute('class', 'webodf-draggable');
+            handle1.setAttribute('end', 'left');
+            handle2.setAttribute('end', 'right');
+            handle1.setAttribute('r', HANDLE_RADIUS);
+            handle2.setAttribute('r', HANDLE_RADIUS);
             overlay.appendChild(polygon);
+            overlay.appendChild(handle1);
+            overlay.appendChild(handle2);
         }
-    }
-
-    /**
-     * Shows or hides the selection overlay for this view
-     * @param {boolean} choice
-     * @return {undefined}
-     */
-    function showOverlay(choice) {
-        var display;
-
-        isVisible = choice;
-        display = (choice === true) ? "block" : "none";
-
-        overlay.style.display = display;
     }
 
     /**
@@ -108,8 +109,8 @@ gui.SvgSelectionView = function SvgSelectionView(cursor) {
      * @return {!{top: !number, left: !number, bottom: !number, right: !number, width: !number, height: !number}}
      */
     function translateRect(rect) {
-        var rootRect = domUtils.getBoundingClientRect(root),
-            zoomLevel = odtDocument.getOdfCanvas().getZoomLevel(),
+        var rootRect = domUtils.getBoundingClientRect(sizer),
+            zoomLevel = zoomHelper.getZoomLevel(),
             resultRect = {};
 
         resultRect.top = domUtils.adaptRangeDifferenceToZoomLevel(rect.top - rootRect.top, zoomLevel);
@@ -129,7 +130,7 @@ gui.SvgSelectionView = function SvgSelectionView(cursor) {
      * - contains only collapsed whitespace (e.g., multiple whitespace characters will only display as 1 character)
      *
      * @param {!Range} range
-     * @returns {!boolean}
+     * @return {!boolean}
      */
     function isRangeVisible(range) {
         var bcr = range.getBoundingClientRect();
@@ -139,14 +140,22 @@ gui.SvgSelectionView = function SvgSelectionView(cursor) {
     /**
      * Set the range to the last visible selection in the text nodes array
      * @param {!Range} range
-     * @param {!Array.<!Node>} nodes
-     * @returns {!boolean}
+     * @param {!Array.<!Element|!Text>} nodes
+     * @return {!boolean}
      */
     function lastVisibleRect(range, nodes) {
         var nextNodeIndex = nodes.length - 1,
             node = nodes[nextNodeIndex],
-            startOffset = range.endContainer === node ? range.endOffset : (node.length || node.childNodes.length),
-            endOffset = startOffset;
+            startOffset,
+            endOffset;
+        if (range.endContainer === node) {
+            startOffset = range.endOffset;
+        } else if (node.nodeType === Node.TEXT_NODE) {
+            startOffset = node.length;
+        } else {
+            startOffset = node.childNodes.length;
+        }
+        endOffset = startOffset;
         range.setStart(node, startOffset);
         range.setEnd(node, endOffset);
         while (!isRangeVisible(range)) {
@@ -174,8 +183,8 @@ gui.SvgSelectionView = function SvgSelectionView(cursor) {
     /**
      * Set the range to the first visible selection in the text nodes array
      * @param {!Range} range
-     * @param {!Array.<!Node>} nodes
-     * @returns {!boolean}
+     * @param {!Array.<!Element|!Text>} nodes
+     * @return {!boolean}
      */
     function firstVisibleRect(range, nodes) {
         var nextNodeIndex = 0,
@@ -315,6 +324,7 @@ gui.SvgSelectionView = function SvgSelectionView(cursor) {
             grownRect = null,
             currentRect,
             range = doc.createRange(),
+            /**@type{!core.PositionFilter}*/
             rootFilter,
             odfNodeFilter = new odf.OdfNodeFilter(),
             treeWalker;
@@ -376,7 +386,7 @@ gui.SvgSelectionView = function SvgSelectionView(cursor) {
         // We use a root filter to avoid taking any rects of nodes in other roots
         // into the bounding rect, should it happen that the selection contains
         // nodes from more than one root. Example: Paragraphs containing annotations
-        rootFilter = odtDocument.createRootFilter(firstNode);
+        rootFilter = document.createRootFilter(firstNode);
 
         // Now since this function is called a lot of times,
         // we need to iterate between and not including the
@@ -406,7 +416,7 @@ gui.SvgSelectionView = function SvgSelectionView(cursor) {
         } else if (firstSibling.nodeType === Node.TEXT_NODE) {
             currentNode = firstSibling;
             range.setStart(currentNode, firstOffset);
-            range.setEnd(currentNode, currentNode === lastSibling ? lastOffset : currentNode.length);
+            range.setEnd(currentNode, currentNode === lastSibling ? lastOffset : /**@type{!Text}*/(currentNode).length);
             currentRect = range.getBoundingClientRect();
             grownRect = checkAndGrowOrCreateRect(grownRect, currentRect);
         } else {
@@ -420,7 +430,7 @@ gui.SvgSelectionView = function SvgSelectionView(cursor) {
             currentNode = treeWalker.currentNode = firstNode;
             while (currentNode && currentNode !== lastNode) {
                 range.setStart(currentNode, firstOffset);
-                range.setEnd(currentNode, currentNode.length);
+                range.setEnd(currentNode, /**@type{!Text}*/(currentNode).length);
 
                 currentRect = range.getBoundingClientRect();
                 grownRect = checkAndGrowOrCreateRect(grownRect, currentRect);
@@ -465,7 +475,7 @@ gui.SvgSelectionView = function SvgSelectionView(cursor) {
 
                 currentNode = treeWalker.previousNode();
                 if (currentNode) {
-                    lastOffset = currentNode.length;
+                    lastOffset = /**@type{!Text}*/(currentNode).length;
                 }
             }
         }
@@ -478,6 +488,7 @@ gui.SvgSelectionView = function SvgSelectionView(cursor) {
      * collapses the rect to the left or right edge, and returns it
      * @param {!Range} range
      * @param {boolean} useRightEdge
+     * @return {{width:number,top:number,bottom:number,height:number,left:number,right:number}}
      */
     function getCollapsedRectOfTextRange(range, useRightEdge) {
         var clientRect = range.getBoundingClientRect(),
@@ -508,9 +519,14 @@ gui.SvgSelectionView = function SvgSelectionView(cursor) {
     }
 
     /**
-     * Repositions overlay over the given selected range of the cursor
+     * Repositions overlay over the given selected range of the cursor. If the
+     * selected range has no visible rectangles (as may happen if the selection only
+     * encompasses collapsed whitespace, or does not span any ODT text elements), this
+     * function will return false to indicate the overlay element can be hidden.
+     *
      * @param {!Range} selectedRange
-     * @return {undefined}
+     * @return {!boolean} Returns true if the selected range is visible (i.e., height +
+     *    width are non-zero), otherwise returns false
      */
     function repositionOverlays(selectedRange) {
         var extremes = getExtremeRanges(selectedRange),
@@ -527,11 +543,7 @@ gui.SvgSelectionView = function SvgSelectionView(cursor) {
 
         // If the range is collapsed (no selection) or no extremes were found, do not show
         // any virtual selections.
-        if (selectedRange.collapsed || !extremes) {
-            showOverlay(false);
-        } else {
-            showOverlay(true);
-
+        if (extremes) {
             firstRange = extremes.firstRange;
             lastRange = extremes.lastRange;
             fillerRange = extremes.fillerRange;
@@ -572,73 +584,118 @@ gui.SvgSelectionView = function SvgSelectionView(cursor) {
                 { x: firstRect.left,    y: top + firstRect.height   }
             ]);
 
+            handle1.setAttribute('cx', firstRect.left);
+            handle1.setAttribute('cy', top + firstRect.height / 2);
+            handle2.setAttribute('cx', lastRect.right);
+            handle2.setAttribute('cy', bottom - lastRect.height / 2);
+
             firstRange.detach();
             lastRange.detach();
             fillerRange.detach();
         }
+        return Boolean(extremes);
     }
 
+    /**
+     * Update the visible selection, or hide if it should no
+     * longer be visible
+     * @return {undefined}
+     */
     function rerender() {
-        addOverlay();
-        if (cursor.getSelectionType() === ops.OdtCursor.RangeSelection) {
-            showOverlay(true);
-            repositionOverlays(cursor.getSelectedRange());
+        var range = cursor.getSelectedRange(),
+            shouldShow;
+        shouldShow = isVisible
+                        && cursor.getSelectionType() === ops.OdtCursor.RangeSelection
+                        && !range.collapsed;
+        if (shouldShow) {
+            addOverlay();
+            shouldShow = repositionOverlays(range);
+        }
+        if (shouldShow) {
+            overlay.style.display = "block";
         } else {
-            showOverlay(false);
+            overlay.style.display = "none";
         }
     }
 
     /**
      * @inheritDoc
      */
-    this.rerender = rerender;
+    this.rerender = function () {
+        if (isVisible) {
+            renderTask.trigger();
+        }
+    };
 
     /**
      * @inheritDoc
      */
-    this.show = rerender;
+    this.show = function () {
+        isVisible = true;
+        renderTask.trigger();
+    };
 
     /**
      * @inheritDoc
      */
     this.hide = function () {
-        showOverlay(false);
+        isVisible = false;
+        renderTask.trigger();
     };
 
     /**
-     * @inheritDoc
-     */
-    this.visible = function () {
-        return isVisible;
-    };
-
-    /**
-     * @param movedCursor {!gui.ShadowCursor|ops.OdtCursor}
+     * @param {!gui.ShadowCursor|ops.OdtCursor} movedCursor
      * @return {undefined}
      */
     function handleCursorMove(movedCursor) {
-        if (movedCursor === cursor) {
-            rerender();
+        if (isVisible && movedCursor === cursor) {
+            renderTask.trigger();
         }
     }
 
     /**
+     * Scale handles to 1/zoomLevel,so they are
+     * finger-friendly at every zoom level.
+     * @param {!number} zoomLevel
+     * @return {undefined}
+     */
+    function scaleHandles(zoomLevel) {
+        var radius = HANDLE_RADIUS / zoomLevel;
+
+        handle1.setAttribute('r', radius);
+        handle2.setAttribute('r', radius);
+    }
+
+    /**
+     * @param {function(!Object=)} callback
+     */
+    function destroy(callback) {
+        sizer.removeChild(overlay);
+        sizer.classList.remove('webodf-virtualSelections');
+        cursor.getDocument().unsubscribe(ops.Document.signalCursorMoved, handleCursorMove);
+        zoomHelper.unsubscribe(gui.ZoomHelper.signalZoomChanged, scaleHandles);
+        callback();
+    }
+
+    /**
      * @inheritDoc
+     * @param {function(!Object=)} callback
      */
     this.destroy = function (callback) {
-        root.removeChild(overlay);
-        cursor.getOdtDocument().unsubscribe(ops.OdtDocument.signalCursorMoved, handleCursorMove);
-
-        callback();
+        core.Async.destroyAll([renderTask.destroy, destroy], callback);
     };
 
     function init() {
         var editinfons = 'urn:webodf:names:editinfo',
             memberid = cursor.getMemberId();
 
+        renderTask = core.Task.createRedrawTask(rerender);
         addOverlay();
         overlay.setAttributeNS(editinfons, 'editinfo:memberid', memberid);
-        cursor.getOdtDocument().subscribe(ops.OdtDocument.signalCursorMoved, handleCursorMove);
+        sizer.classList.add('webodf-virtualSelections');
+        cursor.getDocument().subscribe(ops.Document.signalCursorMoved, handleCursorMove);
+        zoomHelper.subscribe(gui.ZoomHelper.signalZoomChanged, scaleHandles);
+        scaleHandles(zoomHelper.getZoomLevel());
     }
 
     init();

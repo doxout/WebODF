@@ -38,17 +38,18 @@
 
 /*global runtime, core, gui, ops*/
 
-runtime.loadClass("gui.SelectionView");
 
 /**
  * The Selection View Manager is responsible for managing SelectionView objects
  * and attaching/detaching them to cursors.
  * @constructor
+ * @implements {core.Destroyable}
  * @param {!function(new:gui.SelectionView, !(ops.OdtCursor|gui.ShadowCursor))} SelectionView
  */
 gui.SelectionViewManager = function SelectionViewManager(SelectionView) {
     "use strict";
-    var selectionViews = {};
+    var /**@type{!Object.<string,gui.SelectionView>}*/
+        selectionViews = {};
 
     /**
      * @param {!string} memberId
@@ -60,10 +61,10 @@ gui.SelectionViewManager = function SelectionViewManager(SelectionView) {
     this.getSelectionView = getSelectionView;
 
     /**
-     * @returns {!Array.<!gui.SelectionView>}
+     * @return {!Array.<!gui.SelectionView>}
      */
     function getSelectionViews() {
-        return Object.keys(selectionViews).map(function(memberid) { return selectionViews[memberid]; });
+        return Object.keys(selectionViews).map(function (memberid) { return selectionViews[memberid]; });
     }
     this.getSelectionViews = getSelectionViews;
 
@@ -74,7 +75,7 @@ gui.SelectionViewManager = function SelectionViewManager(SelectionView) {
     function removeSelectionView(memberId) {
         if (selectionViews.hasOwnProperty(memberId)) {
             /*jslint emptyblock: true*/
-            selectionViews[memberId].destroy(function() { });
+            selectionViews[memberId].destroy(function () { });
             /*jslint emptyblock: false*/
             delete selectionViews[memberId];
         }
@@ -109,16 +110,14 @@ gui.SelectionViewManager = function SelectionViewManager(SelectionView) {
      */
     this.rerenderSelectionViews = function () {
         Object.keys(selectionViews).forEach(function (memberId) {
-            if(selectionViews[memberId].visible()) {
-                selectionViews[memberId].rerender();
-            }
+            selectionViews[memberId].rerender();
         });
     };
 
     /**
      * @param {!(ops.OdtCursor|gui.ShadowCursor)} cursor
      * @param {!boolean} virtualSelectionsInitiallyVisible
-     * @returns {!gui.SelectionView}
+     * @return {!gui.SelectionView}
      */
     this.registerCursor = function (cursor, virtualSelectionsInitiallyVisible) {
         var memberId = cursor.getMemberId(),
@@ -134,19 +133,30 @@ gui.SelectionViewManager = function SelectionViewManager(SelectionView) {
         return selectionView;
     };
 
+    /**
+     * @param {function(!Object=)} callback
+     */
     this.destroy = function (callback) {
         var selectionViewArray = getSelectionViews();
 
-        (function destroySelectionView(i, err) {
+        /**
+         * @param {!number} i
+         * @param {!Object=} err
+         * @return {undefined}
+         */
+        function destroySelectionView(i, err) {
             if (err) {
                 callback(err);
             } else {
                 if (i < selectionViewArray.length) {
-                    selectionViewArray[i].destroy(function(err) { destroySelectionView(i + 1, err); });
+                    selectionViewArray[i].destroy(function (err) {
+                        destroySelectionView(i + 1, err);
+                    });
                 } else {
                     callback();
                 }
             }
-        }(0, undefined));
+        }
+        destroySelectionView(0, undefined);
     };
 };

@@ -38,13 +38,6 @@
 
 /*global Node, NodeFilter, runtime, core, xmldom, odf, DOMParser, document, webodf_version, XMLHttpRequest, console */
 
-runtime.loadClass("core.Base64");
-runtime.loadClass("core.Zip");
-runtime.loadClass("core.DomUtils");
-runtime.loadClass("xmldom.LSSerializer");
-runtime.loadClass("odf.StyleInfo");
-runtime.loadClass("odf.Namespaces");
-runtime.loadClass("odf.OdfNodeFilter");
 
 (function () {
     "use strict";
@@ -77,22 +70,6 @@ runtime.loadClass("odf.OdfNodeFilter");
            @type{!string}*/
         documentContentScope = "document-content";
 
-    /**
-     * @param {?Node} node
-     * @param {!string} ns
-     * @param {!string} name
-     * @return {?Element}
-     */
-    function getDirectChild(node, ns, name) {
-        node = node ? node.firstChild : null;
-        while (node) {
-            if (node.localName === name && node.namespaceURI === ns) {
-                return /**@type{!Element}*/(node);
-            }
-            node = node.nextSibling;
-        }
-        return null;
-    }
     /**
      * Return the position the node should get according to the ODF flat format.
      * @param {!Node} child
@@ -254,6 +231,22 @@ runtime.loadClass("odf.OdfNodeFilter");
     odf.ODFDocumentElement.prototype.styles;
     odf.ODFDocumentElement.namespaceURI = officens;
     odf.ODFDocumentElement.localName = 'document';
+
+    /*jslint emptyblock: true*/
+    /**
+     * An element that also has a pointer to the optional annotation end
+     * @constructor
+     * @extends {odf.ODFElement}
+     */
+    odf.AnnotationElement = function AnnotationElement() {
+    };
+    /*jslint emptyblock: false*/
+
+    /**
+    * @type {?Element}
+    */
+    odf.AnnotationElement.prototype.annotationEndElement;
+
     // private constructor
     /**
      * @constructor
@@ -367,6 +360,57 @@ runtime.loadClass("odf.OdfNodeFilter");
         }
 
         // private functions
+        /**
+         * Iterates through the subtree of rootElement and adds annotation-end
+         * elements as direct properties of the corresponding annotation elements.
+         * Expects properly used annotation elements, does not try
+         * to do heuristic fixes or drop broken elements.
+         * @param {!Element} rootElement
+         * @return {undefined}
+         */
+        function linkAnnotationStartAndEndElements(rootElement) {
+            var document = rootElement.ownerDocument,
+                /** @type {!Object.<!string,!Element>} */
+                annotationStarts = {},
+                n, name, annotationStart,
+                // TODO: optimize by using a filter rejecting subtrees without annotations possible
+                nodeIterator = document.createNodeIterator(rootElement, NodeFilter.SHOW_ELEMENT, null, false);
+
+            n = /**@type{?Element}*/(nodeIterator.nextNode());
+            while (n) {
+                if (n.namespaceURI === officens) {
+                    if (n.localName === "annotation") {
+                        name = n.getAttributeNS(officens, 'name');
+                        if (name) {
+                            if (annotationStarts.hasOwnProperty(name)) {
+                                runtime.log("Warning: annotation name used more than once with <office:annotation/>: '" + name + "'");
+                            } else {
+                                annotationStarts[name] = n;
+                            }
+                        }
+                    } else if (n.localName === "annotation-end") {
+                        name = n.getAttributeNS(officens, 'name');
+                        if (name) {
+                            if (annotationStarts.hasOwnProperty(name)) {
+                                annotationStart = /** @type {!odf.AnnotationElement}*/(annotationStarts[name]);
+                                if (!annotationStart.annotationEndElement) {
+                                    // Linking annotation start & end
+                                    annotationStart.annotationEndElement = n;
+                                } else {
+                                    runtime.log("Warning: annotation name used more than once with <office:annotation-end/>: '" + name + "'");
+                                }
+                            } else {
+                                runtime.log("Warning: annotation end without an annotation start, name: '" + name + "'");
+                            }
+                        } else {
+                            runtime.log("Warning: annotation end without a name found");
+                        }
+                    }
+                }
+                n = /**@type{?Element}*/(nodeIterator.nextNode());
+            }
+        }
+
         /**
          * Tags all styles with an attribute noting their scope.
          * Helper function for the primitive complete backwriting of
@@ -582,7 +626,7 @@ runtime.loadClass("odf.OdfNodeFilter");
          * Any processing instructions are removed, since importing them
          * gives an exception.
          * @param {Document|undefined} xmldoc
-         * @return {Node|undefined}
+         * @return {!Element|undefined}
          */
         function importRootNode(xmldoc) {
             var doc = self.rootElement.ownerDocument,
@@ -592,7 +636,7 @@ runtime.loadClass("odf.OdfNodeFilter");
             if (xmldoc) {
                 removeProcessingInstructions(xmldoc.documentElement);
                 try {
-                    node = doc.importNode(xmldoc.documentElement, true);
+                    node = /**@type{!Element}*/(doc.importNode(xmldoc.documentElement, true));
                 } catch (ignore) {
                 }
             }
@@ -618,12 +662,15 @@ runtime.loadClass("odf.OdfNodeFilter");
         function setRootElement(root) {
             contentElement = null;
             self.rootElement = /**@type{!odf.ODFDocumentElement}*/(root);
-            root.fontFaceDecls = getDirectChild(root, officens, 'font-face-decls');
-            root.styles = getDirectChild(root, officens, 'styles');
-            root.automaticStyles = getDirectChild(root, officens, 'automatic-styles');
-            root.masterStyles = getDirectChild(root, officens, 'master-styles');
-            root.body = getDirectChild(root, officens, 'body');
-            root.meta = getDirectChild(root, officens, 'meta');
+            root.fontFaceDecls = domUtils.getDirectChild(root, officens, 'font-face-decls');
+            root.styles = domUtils.getDirectChild(root, officens, 'styles');
+            root.automaticStyles = domUtils.getDirectChild(root, officens, 'automatic-styles');
+            root.masterStyles = domUtils.getDirectChild(root, officens, 'master-styles');
+            root.body = domUtils.getDirectChild(root, officens, 'body');
+            root.meta = domUtils.getDirectChild(root, officens, 'meta');
+            root.settings = domUtils.getDirectChild(root, officens, 'settings');
+            root.scripts = domUtils.getDirectChild(root, officens, 'scripts');
+            linkAnnotationStartAndEndElements(root);
         }
         /**
          * @param {Document|undefined} xmldoc
@@ -652,16 +699,16 @@ runtime.loadClass("odf.OdfNodeFilter");
                 setState(OdfContainer.INVALID);
                 return;
             }
-            root.fontFaceDecls = getDirectChild(node, officens, 'font-face-decls');
+            root.fontFaceDecls = domUtils.getDirectChild(node, officens, 'font-face-decls');
             setChild(root, root.fontFaceDecls);
-            n = getDirectChild(node, officens, 'styles');
+            n = domUtils.getDirectChild(node, officens, 'styles');
             root.styles = n || xmldoc.createElementNS(officens, 'styles');
             setChild(root, root.styles);
-            n = getDirectChild(node, officens, 'automatic-styles');
+            n = domUtils.getDirectChild(node, officens, 'automatic-styles');
             root.automaticStyles = n || xmldoc.createElementNS(officens, 'automatic-styles');
             setAutomaticStylesScope(root.automaticStyles, documentStylesScope);
             setChild(root, root.automaticStyles);
-            node = getDirectChild(node, officens, 'master-styles');
+            node = domUtils.getDirectChild(node, officens, 'master-styles');
             root.masterStyles = node || xmldoc.createElementNS(officens,
                     'master-styles');
             setChild(root, root.masterStyles);
@@ -687,14 +734,14 @@ runtime.loadClass("odf.OdfNodeFilter");
                 return;
             }
             root = self.rootElement;
-            fontFaceDecls = getDirectChild(node, officens, 'font-face-decls');
+            fontFaceDecls = domUtils.getDirectChild(node, officens, 'font-face-decls');
             if (root.fontFaceDecls && fontFaceDecls) {
                 fontFaceNameChangeMap = mergeFontFaceDecls(root.fontFaceDecls, fontFaceDecls);
             } else if (fontFaceDecls) {
                 root.fontFaceDecls = fontFaceDecls;
                 setChild(root, fontFaceDecls);
             }
-            automaticStyles = getDirectChild(node, officens, 'automatic-styles');
+            automaticStyles = domUtils.getDirectChild(node, officens, 'automatic-styles');
             setAutomaticStylesScope(automaticStyles, documentContentScope);
             if (fontFaceNameChangeMap) {
                 styleInfo.changeFontFaceNames(automaticStyles, fontFaceNameChangeMap);
@@ -709,7 +756,7 @@ runtime.loadClass("odf.OdfNodeFilter");
                 root.automaticStyles = automaticStyles;
                 setChild(root, automaticStyles);
             }
-            node = getDirectChild(node, officens, 'body');
+            node = domUtils.getDirectChild(node, officens, 'body');
             if (node === null) {
                 throw "<office:body/> tag is mising.";
             }
@@ -728,7 +775,7 @@ runtime.loadClass("odf.OdfNodeFilter");
                 return;
             }
             root = self.rootElement;
-            root.meta = getDirectChild(node, officens, 'meta');
+            root.meta = domUtils.getDirectChild(node, officens, 'meta');
             setChild(root, root.meta);
         }
         /**
@@ -743,7 +790,7 @@ runtime.loadClass("odf.OdfNodeFilter");
                 return;
             }
             root = self.rootElement;
-            root.settings = getDirectChild(node, officens, 'settings');
+            root.settings = domUtils.getDirectChild(node, officens, 'settings');
             setChild(root, root.settings);
         }
         /**
@@ -780,12 +827,21 @@ runtime.loadClass("odf.OdfNodeFilter");
             if (component) {
                 zip.loadAsDOM(component.path, function (err, xmldoc) {
                     component.handler(xmldoc);
-                    if (err || self.state === OdfContainer.INVALID) {
+                    if (self.state === OdfContainer.INVALID) {
+                        if (err) {
+                            runtime.log("ERROR: Unable to load " + component.path + " - " + err);
+                        } else {
+                            runtime.log("ERROR: Unable to load " + component.path);
+                        }
                         return;
+                    }
+                    if (err) {
+                        runtime.log("DEBUG: Unable to load " + component.path + " - " + err);
                     }
                     loadNextComponent(remainingComponents);
                 });
             } else {
+                linkAnnotationStartAndEndElements(self.rootElement);
                 setState(OdfContainer.DONE);
             }
         }
@@ -852,7 +908,7 @@ runtime.loadClass("odf.OdfNodeFilter");
             var header = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n',
                 xml = '<manifest:manifest xmlns:manifest="' + manifestns + '" manifest:version="1.2"></manifest:manifest>',
                 manifest = /**@type{!Document}*/(runtime.parseXML(xml)),
-                manifestRoot = getDirectChild(manifest, manifestns, 'manifest'),
+                manifestRoot = manifest.documentElement,
                 serializer = new xmldom.LSSerializer(),
                 /**@type{string}*/
                 fullPath;
@@ -869,12 +925,17 @@ runtime.loadClass("odf.OdfNodeFilter");
          * @return {!string}
          */
         function serializeSettingsXml() {
-            var serializer = new xmldom.LSSerializer(),
-                /**@type{string}*/
+            var serializer,
+                /**@type{!string}*/
+                s = "";
+            // <office:settings/> is optional, but if present must have at least one child element
+            if (self.rootElement.settings && self.rootElement.settings.firstElementChild) {
+                serializer = new xmldom.LSSerializer();
                 s = createDocumentElement("document-settings");
-            serializer.filter = new odf.OdfNodeFilter();
-            s += serializer.writeToString(self.rootElement.settings, odf.Namespaces.namespaceMap);
-            s += "</office:document-settings>";
+                serializer.filter = new odf.OdfNodeFilter();
+                s += serializer.writeToString(self.rootElement.settings, odf.Namespaces.namespaceMap);
+                s += "</office:document-settings>";
+            }
             return s;
         }
         /**
@@ -1015,9 +1076,9 @@ runtime.loadClass("odf.OdfNodeFilter");
                 body;
             if (!contentElement) {
                 body = self.rootElement.body;
-                contentElement = getDirectChild(body, officens, "text")
-                    || getDirectChild(body, officens, "presentation")
-                    || getDirectChild(body, officens, "spreadsheet");
+                contentElement = domUtils.getDirectChild(body, officens, "text")
+                    || domUtils.getDirectChild(body, officens, "presentation")
+                    || domUtils.getDirectChild(body, officens, "spreadsheet");
             }
             if (!contentElement) {
                 throw "Could not find content element in <office:body/>.";
@@ -1150,6 +1211,11 @@ runtime.loadClass("odf.OdfNodeFilter");
             addToplevelElement("masterStyles",    "master-styles");
             addToplevelElement("body");
             root.body.appendChild(text);
+            partMimetypes["/"] = "application/vnd.oasis.opendocument.text";
+            partMimetypes["settings.xml"] = "text/xml";
+            partMimetypes["meta.xml"] = "text/xml";
+            partMimetypes["styles.xml"] = "text/xml";
+            partMimetypes["content.xml"] = "text/xml";
 
             setState(OdfContainer.DONE);
             return emptyzip;
@@ -1164,12 +1230,20 @@ runtime.loadClass("odf.OdfNodeFilter");
             // refreshed
             // update the zip entries with the data from the live ODF DOM
             var data,
-                date = new Date();
+                date = new Date(),
+                settings;
 
-            updateMetadataForSaving();
-
-            data = runtime.byteArrayFromString(serializeSettingsXml(), "utf8");
+            settings = serializeSettingsXml();
+            if (settings) {
+                // Optional according to package spec
+                // See http://docs.oasis-open.org/office/v1.2/os/OpenDocument-v1.2-os-part1.html#__RefHeading__440346_826425813
+                data = runtime.byteArrayFromString(settings, "utf8");
             zip.save("settings.xml", data, true, date);
+            } else {
+                zip.remove("settings.xml");
+            }
+            updateMetadataForSaving();
+            // Even thought meta-data is optional, it is always created by the previous statement
             data = runtime.byteArrayFromString(serializeMetaXml(), "utf8");
             zip.save("meta.xml", data, true, date);
             data = runtime.byteArrayFromString(serializeStylesXml(), "utf8");

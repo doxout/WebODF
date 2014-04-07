@@ -57,13 +57,6 @@
 var webodfEditor = (function () {
     "use strict";
 
-    runtime.currentDirectory = function () {
-        return "../../webodf/lib";
-    };
-    runtime.libraryPaths = function () {
-        return [ runtime.currentDirectory() ];
-    };
-
     var editorInstance = null,
         serverFactory = null,
         server = null,
@@ -76,19 +69,18 @@ var webodfEditor = (function () {
         booting = false;
 
     // TODO: just some quick hack done for testing, make nice (e.g. the position calculation is fragile)
-    function addStatusOverlay(parentElementId, symbolFileName, position) {
+    function addStatusOverlay(parentElement, symbolFileName, position) {
         var htmlns = document.documentElement.namespaceURI,
-            parentElement = document.getElementById(parentElementId),
             imageElement, overlay;
 
-        runtime.assert(parentElement, "heya, no such element with id "+parentElementId);
+        runtime.assert(parentElement, "heya, no such parentelement");
 
         overlay = document.createElementNS(htmlns, "div");
         imageElement = document.createElementNS(htmlns, "img");
         imageElement.src = symbolFileName;
         overlay.appendChild(imageElement);
-        overlay.style.position = "relative";
-        overlay.style.top = 24*position + "px";
+        overlay.style.position = "absolute";
+        overlay.style.top =  24*position + "px";
         overlay.style.opacity = "0.8";
         overlay.style.display = "none";
         parentElement.appendChild(overlay);
@@ -98,7 +90,7 @@ var webodfEditor = (function () {
     /**
      * Switches the pages by hiding the old one and unhiding the new
      * @param {!string} pageId
-     * @returns {undefined}
+     * @return {undefined}
      */
     function switchToPage(pageId) {
         if (currentPageId) {
@@ -158,7 +150,7 @@ var webodfEditor = (function () {
     }
 
     /**
-     * @returns {undefined}
+     * @return {undefined}
      */
     function showSessions() {
         switchToPage("sessionListContainer");
@@ -170,7 +162,7 @@ var webodfEditor = (function () {
 
     /**
      * @param {!string} sessionId
-     * @returns {undefined}
+     * @return {undefined}
      */
     function enterSession(sessionId) {
         switchToPage("mainContainer");
@@ -189,34 +181,44 @@ var webodfEditor = (function () {
                 "webodf/editor/Editor"],
                     function (Translator, Editor) {
                         var locale = navigator.language || "en-US",
-                            t = new Translator(locale, function (editorTranslator) {
-                                runtime.setTranslator(editorTranslator.translate);
-                                savingOverlay = addStatusOverlay("editor", "document-save.png", 0);
-                                hasLocalUnsyncedOpsOverlay = addStatusOverlay("editor", "vcs-locally-modified.png", 0);
-                                disconnectedOverlay = addStatusOverlay("editor", "network-disconnect.png", 1);
+                            editorBase = dojo.config && dojo.config.paths && dojo.config.paths["webodf/editor"],
+                            translationsDir = '/translations',
+                            t;
 
-                                editorOptions = editorOptions || {}; // TODO: cleanup
-                                editorOptions.networkSecurityToken = token;
-                                editorOptions.closeCallback = closeEditing;
+                        runtime.assert(editorBase, "webodf/editor path not defined in dojoConfig");
 
-                                editorInstance = new Editor(editorOptions, server, serverFactory);
-                                editorInstance.addEventListener(Editor.EVENT_BEFORESAVETOFILE, function() {
-                                    savingOverlay.style.display = "";
-                                });
-                                editorInstance.addEventListener(Editor.EVENT_SAVEDTOFILE, function() {
-                                    savingOverlay.style.display = "none";
-                                });
-                                editorInstance.addEventListener(Editor.EVENT_HASLOCALUNSYNCEDOPERATIONSCHANGED, function(has) {
-                                    hasLocalUnsyncedOpsOverlay.style.display = has ? "" : "none";
-                                });
-                                editorInstance.addEventListener(Editor.EVENT_HASSESSIONHOSTCONNECTIONCHANGED, function(has) {
-                                    disconnectedOverlay.style.display = has ? "none" : "";
-                                });
-                                editorInstance.addEventListener(Editor.EVENT_ERROR, handleEditingError);
+                        t = new Translator(editorBase + translationsDir, locale, function (editorTranslator) {
+                            var canvasContainerElement;
 
-                                // load the document and get called back when it's live
-                                editorInstance.openSession(sessionId, memberId, startEditing);
+                            runtime.setTranslator(editorTranslator.translate);
+
+                            editorOptions = editorOptions || {}; // TODO: cleanup
+                            editorOptions.networkSecurityToken = token;
+                            editorOptions.closeCallback = closeEditing;
+
+                            editorInstance = new Editor("mainContainer", editorOptions, server, serverFactory);
+                            canvasContainerElement = editorInstance.getCanvasContainerElement();
+                            savingOverlay = addStatusOverlay(canvasContainerElement, "document-save.png", 0);
+                            hasLocalUnsyncedOpsOverlay = addStatusOverlay(canvasContainerElement, "vcs-locally-modified.png", 0);
+                            disconnectedOverlay = addStatusOverlay(canvasContainerElement, "network-disconnect.png", 1);
+
+                            editorInstance.addEventListener(Editor.EVENT_BEFORESAVETOFILE, function() {
+                                savingOverlay.style.display = "";
                             });
+                            editorInstance.addEventListener(Editor.EVENT_SAVEDTOFILE, function() {
+                                savingOverlay.style.display = "none";
+                            });
+                            editorInstance.addEventListener(Editor.EVENT_HASLOCALUNSYNCEDOPERATIONSCHANGED, function(has) {
+                                hasLocalUnsyncedOpsOverlay.style.display = has ? "" : "none";
+                            });
+                            editorInstance.addEventListener(Editor.EVENT_HASSESSIONHOSTCONNECTIONCHANGED, function(has) {
+                                disconnectedOverlay.style.display = has ? "none" : "";
+                            });
+                            editorInstance.addEventListener(Editor.EVENT_ERROR, handleEditingError);
+
+                            // load the document and get called back when it's live
+                            editorInstance.openSession(sessionId, memberId, startEditing);
+                        });
                     }
                 );
             } else {
@@ -245,7 +247,7 @@ var webodfEditor = (function () {
      * with the sessionId as parameter
      *
      * @param {!function(!string, !string, ?string)} callback
-     * @returns {undefined}
+     * @return {undefined}
      */
     function startLoginProcess(callback) {
         booting = true;
@@ -282,7 +284,7 @@ var webodfEditor = (function () {
         }
 
         /**
-         * @returns {!boolean}
+         * @return {!boolean}
          */
         function onLoginSubmit() {
             server.login(document.loginForm.login.value, document.loginForm.password.value, loginSuccess, loginFail);
@@ -306,7 +308,7 @@ var webodfEditor = (function () {
      *
      * callback:  callback to be called as soon as the document is loaded
      *
-     * @returns {undefined}
+     * @return {undefined}
      */
     function boot(args) {
         runtime.assert(!booting, "editor creation already in progress");

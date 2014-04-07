@@ -63,12 +63,17 @@ ops.Operation.prototype.init = function (data) {"use strict"; };
 ops.Operation.prototype.isEdit;
 
 /**
- * @param {!ops.OdtDocument} odtDocument
- * @return {!boolean}
+ * @type {string}
  */
-ops.Operation.prototype.execute = function (odtDocument) {"use strict"; };
+ops.Operation.prototype.group;
 
 /**
- * @return {!{optype,memberid,timestamp}}
+ * @param {!ops.Document} document
+ * @return {!boolean} true if the operation was executed
+ */
+ops.Operation.prototype.execute = function (document) {"use strict"; };
+
+/**
+ * @return {!{optype:string,memberid:string,timestamp:number}}
  */
 ops.Operation.prototype.spec = function () {"use strict"; };

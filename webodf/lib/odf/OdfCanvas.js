@@ -39,14 +39,6 @@
 /*jslint sub: true*/
 /*global runtime, odf, xmldom, webodf_css, core, gui */
 
-runtime.loadClass("core.DomUtils");
-runtime.loadClass("odf.OdfContainer");
-runtime.loadClass("odf.Formatting");
-runtime.loadClass("xmldom.XPath");
-runtime.loadClass("odf.FontLoader");
-runtime.loadClass("odf.Style2CSS");
-runtime.loadClass("odf.OdfUtils");
-runtime.loadClass("gui.AnnotationViewManager");
 
 (function () {
     "use strict";
@@ -97,6 +89,7 @@ runtime.loadClass("gui.AnnotationViewManager");
     }
     /**
      * @constructor
+     * @implements {core.Destroyable}
      * @param {!HTMLStyleElement} css
      */
     function PageSwitcher(css) {
@@ -161,7 +154,7 @@ runtime.loadClass("gui.AnnotationViewManager");
          * @param {!function(!Object=)} callback, passing an error object in case of error
          * @return {undefined}
          */
-        this.destroy = function(callback) {
+        this.destroy = function (callback) {
             css.parentNode.removeChild(css);
             callback();
         };
@@ -211,6 +204,18 @@ runtime.loadClass("gui.AnnotationViewManager");
         }
     }
     /**
+     * @param {!HTMLStyleElement} style
+     * @return {undefined}
+     */
+    function clearCSSStyleSheet(style) {
+        var stylesheet = /**@type{!CSSStyleSheet}*/(style.sheet),
+            cssRules = stylesheet.cssRules;
+
+        while (cssRules.length) {
+            stylesheet.deleteRule(cssRules.length - 1);
+        }
+    }
+    /**
      * A new styles.xml has been loaded. Update the live document with it.
      * @param {!odf.OdfContainer} odfcontainer
      * @param {!odf.Formatting} formatting
@@ -219,14 +224,22 @@ runtime.loadClass("gui.AnnotationViewManager");
      **/
     function handleStyles(odfcontainer, formatting, stylesxmlcss) {
         // update the css translation of the styles
-        var style2css = new odf.Style2CSS();
+        var style2css = new odf.Style2CSS(),
+            list2css = new odf.ListStyleToCss(),
+            styleSheet = /**@type{!CSSStyleSheet}*/(stylesxmlcss.sheet),
+            styleTree = new odf.StyleTree(
+                odfcontainer.rootElement.styles,
+                odfcontainer.rootElement.automaticStyles).getStyleTree();
+
         style2css.style2css(
             odfcontainer.getDocumentType(),
-            /**@type{!CSSStyleSheet}*/(stylesxmlcss.sheet),
+            odfcontainer.rootElement,
+            styleSheet,
             formatting.getFontMap(),
-            odfcontainer.rootElement.styles,
-            odfcontainer.rootElement.automaticStyles
+            styleTree
         );
+
+        list2css.applyListStyles(styleSheet, styleTree);
     }
 
     /**
@@ -239,31 +252,6 @@ runtime.loadClass("gui.AnnotationViewManager");
         var fontLoader = new odf.FontLoader();
         fontLoader.loadFonts(odfContainer,
             /**@type{!CSSStyleSheet}*/(fontcss.sheet));
-    }
-
-    /**
-     * @param {!odf.OdfContainer} odfContainer
-     * @param {string} masterPageName
-     * @return {?Element}
-     */
-    function getMasterPageElement(odfContainer, masterPageName) {
-        if (!masterPageName) {
-            return null;
-        }
-
-        var masterStyles = odfContainer.rootElement.masterStyles,
-            masterStylesChild = masterStyles.firstElementChild;
-
-        while (masterStylesChild) {
-            if (masterStylesChild.getAttributeNS(stylens, 'name')
-                    === masterPageName
-                    && masterStylesChild.localName === "master-page"
-                    && masterStylesChild.namespaceURI === stylens) {
-                break;
-            }
-            masterStylesChild = masterStylesChild.nextElementSibling;
-        }
-        return masterStylesChild;
     }
 
     /**
@@ -593,13 +581,14 @@ runtime.loadClass("gui.AnnotationViewManager");
     }
 
     /**
+     * @param {!odf.Formatting} formatting
      * @param {!odf.OdfContainer} odfContainer
      * @param {!Element} shadowContent
      * @param {!Element} odfbody
      * @param {!CSSStyleSheet} stylesheet
      * @return {undefined}
      **/
-    function cloneMasterPages(odfContainer, shadowContent, odfbody, stylesheet) {
+    function cloneMasterPages(formatting, odfContainer, shadowContent, odfbody, stylesheet) {
         var masterPageName,
             masterPageElement,
             styleId,
@@ -623,7 +612,7 @@ runtime.loadClass("gui.AnnotationViewManager");
             // If there was a master-page-name attribute, then we are dealing with a draw:page.
             // Get the referenced master page element from the master styles
             masterPageName = element.getAttributeNS(drawns, 'master-page-name');
-            masterPageElement = getMasterPageElement(odfContainer, masterPageName);
+            masterPageElement = formatting.getMasterPageElement(masterPageName);
 
             // If the referenced master page exists, create a new page and copy over it's contents into the new page,
             // except for the ones that are placeholders. Also, call setDrawElementPosition on each of those child frames.
@@ -885,31 +874,72 @@ runtime.loadClass("gui.AnnotationViewManager");
     }
 
     /**
+     * @param {!HTMLHeadElement} head
+     * @return {?HTMLStyleElement}
+     */
+    function findWebODFStyleSheet(head) {
+        var style = head.firstElementChild;
+        while (style && !(style.localName === "style"
+                && style.hasAttribute("webodfcss"))) {
+            style = style.nextElementSibling;
+        }
+        return /**@type{?HTMLStyleElement}*/(style);
+    }
+
+    /**
      * @param {!Document} document
      * @return {!HTMLStyleElement}
      */
     function addWebODFStyleSheet(document) {
         var head = /**@type{!HTMLHeadElement}*/(document.getElementsByTagName('head')[0]),
+            css,
+            /**@type{?HTMLStyleElement}*/
             style,
-            href;
-        if (String(typeof webodf_css) !== "undefined") {
-            style = document.createElementNS(head.namespaceURI, 'style');
-            style.setAttribute('media', 'screen, print, handheld, projection');
-            style.appendChild(document.createTextNode(webodf_css));
+            href,
+            count = document.styleSheets.length;
+        // make sure this is only added once per HTML document, e.g. in case of
+        // multiple odfCanvases
+        style = findWebODFStyleSheet(head);
+        if (style) {
+            count = parseInt(style.getAttribute("webodfcss"), 10);
+            style.setAttribute("webodfcss", count + 1);
+            return style;
+        }
+        if (String(typeof webodf_css) === "string") {
+            css = /**@type{!string}*/(webodf_css);
         } else {
-            style = document.createElementNS(head.namespaceURI, 'link');
             href = "webodf.css";
             if (runtime.currentDirectory) {
-                href = runtime.currentDirectory() + "/../" + href;
+                href = runtime.currentDirectory();
+                if (href.length > 0 && href.substr(-1) !== "/") {
+                    href += "/";
+                }
+                href += "../webodf.css";
             }
-            style.setAttribute('href', href);
-            style.setAttribute('rel', 'stylesheet');
+            css = /**@type{!string}*/(runtime.readFileSync(href, "utf-8"));
         }
+        style = /**@type{!HTMLStyleElement}*/(document.createElementNS(head.namespaceURI, 'style'));
+        style.setAttribute('media', 'screen, print, handheld, projection');
         style.setAttribute('type', 'text/css');
-        // TODO: make sure this is only added once per HTML document, e.g. in case of multiple odfCanvases
+        style.setAttribute('webodfcss', '1');
+        style.appendChild(document.createTextNode(css));
         head.appendChild(style);
-        return /**@type {!HTMLStyleElement}*/(style);
+        return style;
     }
+
+    /**
+     * @param {!HTMLStyleElement} webodfcss
+     * @return {undefined}
+     */
+    function removeWebODFStyleSheet(webodfcss) {
+        var count = parseInt(webodfcss.getAttribute("webodfcss"), 10);
+        if (count === 1) {
+             webodfcss.parentNode.removeChild(webodfcss);
+        } else {
+             webodfcss.setAttribute("count", count - 1);
+        }
+    }
+
     /**
      * @param {!Document} document Put and ODF Canvas inside this element.
      * @return {!HTMLStyleElement}
@@ -935,6 +965,8 @@ runtime.loadClass("gui.AnnotationViewManager");
      * stylesheets are loaded.
      * @constructor
      * @implements {gui.AnnotatableCanvas}
+     * @implements {ops.Canvas}
+     * @implements {core.Destroyable}
      * @param {!HTMLElement} element Put and ODF Canvas inside this element.
      */
     odf.OdfCanvas = function OdfCanvas(element) {
@@ -958,18 +990,24 @@ runtime.loadClass("gui.AnnotationViewManager");
             showAnnotationRemoveButton = false,
             /**@type{gui.AnnotationViewManager}*/
             annotationViewManager = null,
+            /**@type{!HTMLStyleElement}*/
             webodfcss,
+            /**@type{!HTMLStyleElement}*/
             fontcss,
+            /**@type{!HTMLStyleElement}*/
             stylesxmlcss,
-            /**@type{HTMLStyleElement}*/
+            /**@type{!HTMLStyleElement}*/
             positioncss,
             shadowContent,
-            /**@type{number}*/
-            zoomLevel = 1,
             /**@type{!Object.<string,!Array.<!Function>>}*/
             eventHandlers = {},
             waitingForDoneTimeoutId,
-            loadingQueue = new LoadingQueue();
+            /**@type{!core.ScheduledTask}*/redrawContainerTask,
+            shouldRefreshCss = false,
+            shouldRerenderAnnotations = false,
+            loadingQueue = new LoadingQueue(),
+            /**@type{!gui.ZoomHelper}*/
+            zoomHelper = new gui.ZoomHelper();
 
         /**
          * Load all the images that are inside an odf element.
@@ -1072,33 +1110,20 @@ runtime.loadClass("gui.AnnotationViewManager");
          */
         function fixContainerSize() {
             var minHeight,
-                odfdoc = sizer.firstChild;
+                odfdoc = sizer.firstChild,
+                zoomLevel = zoomHelper.getZoomLevel();
+
             if (!odfdoc) {
                 return;
             }
 
-            /*
-                When zoom > 1,
-                - origin needs to be 'center top'
-                When zoom < 1
-                - origin needs to be 'left top'
-            */
-            if (zoomLevel > 1) {
-                sizer.style.MozTransformOrigin = 'center top';
-                sizer.style.WebkitTransformOrigin = 'center top';
-                sizer.style.OTransformOrigin = 'center top';
-                sizer.style.msTransformOrigin = 'center top';
-            } else {
-                sizer.style.MozTransformOrigin = 'left top';
-                sizer.style.WebkitTransformOrigin = 'left top';
-                sizer.style.OTransformOrigin = 'left top';
-                sizer.style.msTransformOrigin = 'left top';
-            }
-
-            sizer.style.WebkitTransform = 'scale(' + zoomLevel + ')';
-            sizer.style.MozTransform = 'scale(' + zoomLevel + ')';
-            sizer.style.OTransform = 'scale(' + zoomLevel + ')';
-            sizer.style.msTransform = 'scale(' + zoomLevel + ')';
+            // All zooming of the sizer within the canvas
+            // is done relative to the top-left corner.
+            sizer.style.WebkitTransformOrigin = "0% 0%";
+            sizer.style.MozTransformOrigin = "0% 0%";
+            sizer.style.msTransformOrigin = "0% 0%";
+            sizer.style.OTransformOrigin = "0% 0%";
+            sizer.style.transformOrigin = "0% 0%";
 
             if (annotationViewManager) {
                 minHeight = annotationViewManager.getMinimumHeightForAnnotationPane();
@@ -1112,6 +1137,25 @@ runtime.loadClass("gui.AnnotationViewManager");
             element.style.width = Math.round(zoomLevel * sizer.offsetWidth) + "px";
             element.style.height = Math.round(zoomLevel * sizer.offsetHeight) + "px";
         }
+
+        /**
+         * @return {undefined}
+         */
+        function redrawContainer() {
+            if (shouldRefreshCss) {
+                handleStyles(odfcontainer, formatting, stylesxmlcss);
+                shouldRefreshCss = false;
+                // different styles means different layout, thus different sizes
+            }
+            if (shouldRerenderAnnotations) {
+                if (annotationViewManager) {
+                    annotationViewManager.rerenderAnnotations();
+                }
+                shouldRerenderAnnotations = false;
+            }
+            fixContainerSize();
+        }
+
         /**
          * A new content.xml has been loaded. Update the live document with it.
          * @param {!odf.OdfContainer} container
@@ -1126,6 +1170,14 @@ runtime.loadClass("gui.AnnotationViewManager");
             sizer = /**@type{!HTMLDivElement}*/(doc.createElementNS(element.namespaceURI, 'div'));
             sizer.style.display = "inline-block";
             sizer.style.background = "white";
+            // When the window is shrunk such that the
+            // canvas container has a horizontal scrollbar,
+            // zooming out seems to not make the scrollable
+            // width disappear. This extra scrollable
+            // width seems to be proportional to the
+            // annotation pane's width. Setting the 'float'
+            // of the sizer to 'left' fixes this in webkit.
+            sizer.style.setProperty("float", "left", "important");
             sizer.appendChild(odfnode);
             element.appendChild(sizer);
 
@@ -1145,7 +1197,7 @@ runtime.loadClass("gui.AnnotationViewManager");
             container.getContentElement().appendChild(shadowContent);
 
             modifyDrawElements(odfnode.body, css);
-            cloneMasterPages(container, shadowContent, odfnode.body, css);
+            cloneMasterPages(formatting, container, shadowContent, odfnode.body, css);
             modifyTables(odfnode.body, element.namespaceURI);
             modifyLineBreakElements(odfnode.body);
             expandSpaceElements(odfnode.body);
@@ -1155,7 +1207,8 @@ runtime.loadClass("gui.AnnotationViewManager");
             loadLists(odfnode.body, css, element.namespaceURI);
 
             sizer.insertBefore(shadowContent, sizer.firstChild);
-            fixContainerSize();
+
+            zoomHelper.setZoomableElement(sizer);
         }
 
         /**
@@ -1164,27 +1217,9 @@ runtime.loadClass("gui.AnnotationViewManager");
         * @return {undefined}
         */
         function modifyAnnotations(odffragment) {
-            var annotationNodes = domUtils.getElementsByTagNameNS(odffragment, officens, 'annotation'),
-                annotationEnds = domUtils.getElementsByTagNameNS(odffragment, officens, 'annotation-end'),
-                currentAnnotationName,
-                i;
+            var annotationNodes = /**@type{!Array.<!odf.AnnotationElement>}*/(domUtils.getElementsByTagNameNS(odffragment, officens, 'annotation'));
 
-            /**
-            * @param {!Element} element
-            * @return {boolean}
-            */
-            function matchAnnotationEnd(element) {
-                return currentAnnotationName === element.getAttributeNS(officens, 'name');
-            }
-
-            for (i = 0; i < annotationNodes.length; i += 1) {
-                currentAnnotationName = annotationNodes[i].getAttributeNS(officens, 'name');
-                annotationViewManager.addAnnotation({
-                    node: annotationNodes[i],
-                    end: annotationEnds.filter(matchAnnotationEnd)[0] || null
-                });
-            }
-
+            annotationNodes.forEach(annotationViewManager.addAnnotation);
             annotationViewManager.rerenderAnnotations();
         }
 
@@ -1221,7 +1256,14 @@ runtime.loadClass("gui.AnnotationViewManager");
 
             // synchronize the object a window.odfcontainer with the view
             function callback() {
+                // clean up
+                clearCSSStyleSheet(fontcss);
+                clearCSSStyleSheet(stylesxmlcss);
+                clearCSSStyleSheet(positioncss);
+
                 clear(element);
+
+                // setup
                 element.style.display = "inline-block";
                 var odfnode = odfcontainer.rootElement;
                 element.ownerDocument.importNode(odfnode, true);
@@ -1266,9 +1308,8 @@ runtime.loadClass("gui.AnnotationViewManager");
          * @return {undefined}
          */
         this.refreshCSS = function () {
-            handleStyles(odfcontainer, formatting, stylesxmlcss);
-            // different styles means different layout, thus different sizes:
-            fixContainerSize();
+            shouldRefreshCss = true;
+            redrawContainerTask.trigger();
         };
 
         /**
@@ -1277,7 +1318,7 @@ runtime.loadClass("gui.AnnotationViewManager");
          * @return {undefined}
          */
         this.refreshSize = function () {
-            fixContainerSize();
+            redrawContainerTask.trigger();
         };
         /**
          * @return {!odf.OdfContainer}
@@ -1300,7 +1341,9 @@ runtime.loadClass("gui.AnnotationViewManager");
          * @return {undefined}
          */
         function load(url) {
+            // clean up
             loadingQueue.clearQueue();
+
             // FIXME: We need to support parametrized strings, because
             // drop-in word replacements are inadequate for translations;
             // see http://techbase.kde.org/Development/Tutorials/Localization/i18n_Mistakes#Pitfall_.232:_Word_Puzzles
@@ -1369,18 +1412,18 @@ runtime.loadClass("gui.AnnotationViewManager");
          */
         this.rerenderAnnotations = function () {
             if (annotationViewManager) {
-                annotationViewManager.rerenderAnnotations();
-                fixContainerSize();
+                shouldRerenderAnnotations = true;
+                redrawContainerTask.trigger();
             }
         };
 
         /**
          * This returns the element inside the canvas which can be zoomed with
          * CSS and which contains the ODF document and the annotation sidebar.
-         * @return {Element}
+         * @return {!HTMLElement}
          */
         this.getSizer = function () {
-            return sizer;
+            return /**@type{!HTMLElement}*/(sizer);
         };
 
         /** Allows / disallows annotations
@@ -1401,7 +1444,7 @@ runtime.loadClass("gui.AnnotationViewManager");
         /**
          * Adds an annotation for the annotaiton manager to track
          * and wraps and highlights it
-         * @param {!{node:!Element,end:Node}} annotation
+         * @param {!odf.AnnotationElement} annotation
          * @return {undefined}
          */
         this.addAnnotation = function (annotation) {
@@ -1423,18 +1466,24 @@ runtime.loadClass("gui.AnnotationViewManager");
         };
 
         /**
+         * @return {!gui.ZoomHelper}
+         */
+        this.getZoomHelper = function () {
+            return zoomHelper;
+        };
+
+        /**
          * @param {!number} zoom
          * @return {undefined}
          */
         this.setZoomLevel = function (zoom) {
-            zoomLevel = zoom;
-            fixContainerSize();
+            zoomHelper.setZoomLevel(zoom);
         };
         /**
          * @return {!number}
          */
         this.getZoomLevel = function () {
-            return zoomLevel;
+            return zoomHelper.getZoomLevel();
         };
         /**
          * @param {!number} width
@@ -1442,22 +1491,24 @@ runtime.loadClass("gui.AnnotationViewManager");
          * @return {undefined}
          */
         this.fitToContainingElement = function (width, height) {
-            var realWidth = element.offsetWidth / zoomLevel,
-                realHeight = element.offsetHeight / zoomLevel;
-            zoomLevel = width / realWidth;
-            if (height / realHeight < zoomLevel) {
-                zoomLevel = height / realHeight;
+            var zoomLevel = zoomHelper.getZoomLevel(),
+                realWidth = element.offsetWidth / zoomLevel,
+                realHeight = element.offsetHeight / zoomLevel,
+                zoom;
+
+            zoom = width / realWidth;
+            if (height / realHeight < zoom) {
+                zoom = height / realHeight;
             }
-            fixContainerSize();
+            zoomHelper.setZoomLevel(zoom);
         };
         /**
          * @param {!number} width
          * @return {undefined}
          */
         this.fitToWidth = function (width) {
-            var realWidth = element.offsetWidth / zoomLevel;
-            zoomLevel = width / realWidth;
-            fixContainerSize();
+            var realWidth = element.offsetWidth / zoomHelper.getZoomLevel();
+            zoomHelper.setZoomLevel(width / realWidth);
         };
         /**
          * @param {!number} width
@@ -1465,7 +1516,8 @@ runtime.loadClass("gui.AnnotationViewManager");
          * @return {undefined}
          */
         this.fitSmart = function (width, height) {
-            var realWidth, realHeight, newScale;
+            var realWidth, realHeight, newScale,
+                zoomLevel = zoomHelper.getZoomLevel();
 
             realWidth = element.offsetWidth / zoomLevel;
             realHeight = element.offsetHeight / zoomLevel;
@@ -1477,18 +1529,15 @@ runtime.loadClass("gui.AnnotationViewManager");
                 }
             }
 
-            zoomLevel = Math.min(1.0, newScale);
-
-            fixContainerSize();
+            zoomHelper.setZoomLevel(Math.min(1.0, newScale));
         };
         /**
          * @param {!number} height
          * @return {undefined}
          */
         this.fitToHeight = function (height) {
-            var realHeight = element.offsetHeight / zoomLevel;
-            zoomLevel = height / realHeight;
-            fixContainerSize();
+            var realHeight = element.offsetHeight / zoomHelper.getZoomLevel();
+            zoomHelper.setZoomLevel(height / realHeight);
         };
         /**
          * @return {undefined}
@@ -1544,24 +1593,30 @@ runtime.loadClass("gui.AnnotationViewManager");
          * @return {undefined}
          */
         this.destroy = function(callback) {
-            var head = /**@type{!HTMLHeadElement}*/(doc.getElementsByTagName('head')[0]);
+            var head = /**@type{!HTMLHeadElement}*/(doc.getElementsByTagName('head')[0]),
+                cleanup = [pageSwitcher.destroy, redrawContainerTask.destroy];
+
             runtime.clearTimeout(waitingForDoneTimeoutId);
             // TODO: anything to clean with annotationViewManager?
             if (annotationsPane && annotationsPane.parentNode) {
                 annotationsPane.parentNode.removeChild(annotationsPane);
             }
-            if (sizer) {
-                element.removeChild(sizer);
-                sizer = null;
-            }
+
+            zoomHelper.destroy(function () {
+                if (sizer) {
+                    element.removeChild(sizer);
+                    sizer = null;
+                }
+            });
+
             // remove all styles
-            head.removeChild(webodfcss);
+            removeWebODFStyleSheet(webodfcss);
             head.removeChild(fontcss);
             head.removeChild(stylesxmlcss);
             head.removeChild(positioncss);
 
             // TODO: loadingQueue, make sure it is empty
-            pageSwitcher.destroy(callback);
+            core.Async.destroyAll(cleanup, callback);
         };
 
         function init() {
@@ -1570,6 +1625,8 @@ runtime.loadClass("gui.AnnotationViewManager");
             fontcss = addStyleSheet(doc);
             stylesxmlcss = addStyleSheet(doc);
             positioncss = addStyleSheet(doc);
+            redrawContainerTask = core.Task.createRedrawTask(redrawContainer);
+            zoomHelper.subscribe(gui.ZoomHelper.signalZoomChanged, fixContainerSize);
         }
 
         init();

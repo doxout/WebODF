@@ -42,24 +42,34 @@ function ODFViewerPlugin() {
     "use strict";
 
     function init(callback) {
-        var lib = document.createElement('script');
+        var lib = document.createElement('script'),
+            pluginCSS;
+
         lib.async = false;
         lib.src = './webodf.js';
         lib.type = 'text/javascript';
         lib.onload = function () {
-            runtime.currentDirectory = function () {
-                return "../../webodf/lib";
-            };
-            runtime.libraryPaths = function () {
-                return [ runtime.currentDirectory() ];
-            };
-
             runtime.loadClass('gui.HyperlinkClickHandler');
             runtime.loadClass('odf.OdfCanvas');
+            runtime.loadClass('ops.Session');
+            runtime.loadClass('gui.CaretManager');
+            runtime.loadClass("gui.HyperlinkTooltipView");
+            runtime.loadClass('gui.SessionController');
+            runtime.loadClass('gui.SvgSelectionView');
+            runtime.loadClass('gui.SelectionViewManager');
+            runtime.loadClass('gui.ShadowCursor');
+            runtime.loadClass('gui.SessionView');
+
             callback();
         };
 
         document.getElementsByTagName('head')[0].appendChild(lib);
+
+        pluginCSS = document.createElement('link');
+        pluginCSS.setAttribute("rel", "stylesheet");
+        pluginCSS.setAttribute("type", "text/css");
+        pluginCSS.setAttribute("href", "./ODFViewerPlugin.css");
+        document.head.appendChild(pluginCSS);
     }
 
     // that should probably be provided by webodf
@@ -87,7 +97,17 @@ function ODFViewerPlugin() {
     this.initialize = function (viewerElement, documentUrl) {
         // If the URL has a fragment (#...), try to load the file it represents
         init(function () {
-            var hyperlinkClickHandler;
+            var session,
+                sessionController,
+                sessionView,
+                odtDocument,
+                shadowCursor,
+                selectionViewManager,
+                caretManager,
+                localMemberId = 'localuser',
+                hyperlinkTooltipView,
+                eventManager;
+
             odfElement = document.getElementById('canvas');
             odfCanvas = new odf.OdfCanvas(odfElement);
             odfCanvas.load(documentUrl);
@@ -98,14 +118,37 @@ function ODFViewerPlugin() {
                 documentType = odfCanvas.odfContainer().getDocumentType(root);
                 if (documentType === 'text') {
                     odfCanvas.enableAnnotations(true, false);
+
+                    session = new ops.Session(odfCanvas);
+                    odtDocument = session.getOdtDocument();
+                    shadowCursor = new gui.ShadowCursor(odtDocument);
+                    sessionController = new gui.SessionController(session, localMemberId, shadowCursor, {});
+                    eventManager = sessionController.getEventManager();
+                    caretManager = new gui.CaretManager(sessionController);
+                    selectionViewManager = new gui.SelectionViewManager(gui.SvgSelectionView);
+                    sessionView = new gui.SessionView({
+                        caretAvatarsInitiallyVisible: false
+                    }, localMemberId, session, caretManager, selectionViewManager);
+                    selectionViewManager.registerCursor(shadowCursor);
+                    hyperlinkTooltipView = new gui.HyperlinkTooltipView(odfCanvas,
+                        sessionController.getHyperlinkClickHandler().getModifier);
+                    eventManager.subscribe("mousemove", hyperlinkTooltipView.showTooltip);
+                    eventManager.subscribe("mouseout", hyperlinkTooltipView.hideTooltip);
+
+                    var op = new ops.OpAddMember();
+                    op.init({
+                        memberid: localMemberId,
+                        setProperties: {
+                            fillName: runtime.tr("Unknown Author"),
+                            color: "blue"
+                        }
+                    });
+                    session.enqueue([op]);
+                    sessionController.insertLocalCursor();
                 }
+
                 self.onLoad();
             });
-
-            hyperlinkClickHandler = new gui.HyperlinkClickHandler(function () {
-                return odfCanvas.odfContainer().getContentElement();
-            });
-            odfCanvas.addListener("click", hyperlinkClickHandler.handleEvent);
         });
     };
 

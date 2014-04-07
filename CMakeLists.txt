@@ -14,6 +14,8 @@ else (ProcessorCountFound)
   set(NProcessors 1)
 endif (ProcessorCountFound)
 
+SET(REQUIRED_NODEJS_VERSION 0.10.5)
+
 # At this point, the version number that is used throughout is defined
 # The version number is gotten from either the git repository or the name of the
 # folder. If the current folder has a name that matches "webodf-\d+.\d+.\d+"
@@ -127,36 +129,44 @@ if(WIN32)
         EXPECTED_MD5 ${NODE_BIN_MD5}
     )
     set(NODE ${CMAKE_BINARY_DIR}/NodeJS-prefix/bin/node.exe)
-
-    add_custom_command(
-        OUTPUT "${NODE}"
-        COMMAND ${CMAKE_COMMAND} ARGS -E make_directory ${CMAKE_BINARY_DIR}/NodeJS-prefix
-        COMMAND ${CMAKE_COMMAND} ARGS -E make_directory ${CMAKE_BINARY_DIR}/NodeJS-prefix/bin
-        COMMAND ${CMAKE_COMMAND} ARGS -E copy ${EXTERNALS_DOWNLOAD_DIR}/node-download.exe
-            "${NODE}"
+    execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/NodeJS-prefix
+      COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/NodeJS-prefix/bin
+      COMMAND ${CMAKE_COMMAND} -E copy ${EXTERNALS_DOWNLOAD_DIR}/node-download.exe "${NODE}"
     )
     add_custom_target(NodeJS DEPENDS "${NODE}")
 else(WIN32)
-    ExternalProject_Add(
-        NodeJS
-        PREFIX ${CMAKE_BINARY_DIR}/NodeJS-prefix
-        DOWNLOAD_DIR ${EXTERNALS_DOWNLOAD_DIR}
-        URL "http://nodejs.org/dist/v${NODEVERSION}/node-v${NODEVERSION}.tar.gz"
-        URL_MD5 784e7d7a8e29dfec88ddb2e72a895407
-        CONFIGURE_COMMAND ./configure --prefix=${CMAKE_BINARY_DIR}/NodeJS-prefix
-        INSTALL_DIR ${CMAKE_BINARY_DIR}/NodeJS-prefix
-        BUILD_COMMAND make -j${NProcessors}
-        BUILD_IN_SOURCE 1
+    SET(NODEJS_VERSION 0.0.0)
+    FIND_PROGRAM(NODEJS_EXECUTABLE
+        NAMES node
+        PATHS ""
+        DOC "Path to NodeJS executable"
     )
+    IF(NODEJS_EXECUTABLE)
+        EXEC_PROGRAM(${NODEJS_EXECUTABLE} ARGS --version OUTPUT_VARIABLE NODEJS_VERSION)
+        string(SUBSTRING ${NODEJS_VERSION} 1 -1 NODEJS_VERSION)
+    ENDIF(NODEJS_EXECUTABLE)
+    MESSAGE (STATUS "nodejs found: " ${NODEJS_EXECUTABLE} / ${NODEJS_VERSION})
 
-    # copy node_modules directory from source to build
-    # (this is needed if a module is required in there)
-    add_custom_target(copy_node_modules ALL
-        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/node_modules ${CMAKE_BINARY_DIR}/node_modules
-        COMMENT copying node_modules from source to build
-    )
-    set(NODE ${CMAKE_BINARY_DIR}/NodeJS-prefix/bin/node)
+    # fail if NodeJS version requirement is not satisfied
+    if (${NODEJS_VERSION} VERSION_LESS ${REQUIRED_NODEJS_VERSION})
+        message(FATAL_ERROR "Node.JS is required in version " ${REQUIRED_NODEJS_VERSION}  " or later")
+    else()
+        message(STATUS "good Node.JS found: " ${NODEJS_VERSION} " (" ${REQUIRED_NODEJS_VERSION} " required.)")
+    endif()
+    set(NODE ${NODEJS_EXECUTABLE})
+    add_custom_target(NodeJS DEPENDS "${NODEJS_EXECUTABLE}")
 endif(WIN32)
+
+# copy node_modules directory from source to build
+# (this is needed if a module is required in there)
+
+# Node's search path for node_modules starts from the main package and works up towards the root.
+# In order to see these node modules, they need to be somewhere in this path
+# See http://nodejs.org/api/modules.html#modules_loading_from_node_modules_folders for more detail
+add_custom_target(copy_node_modules ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/node_modules ${CMAKE_BINARY_DIR}/node_modules
+    COMMENT copying node_modules from source to build
+)
 
 
 # JSCoverage
@@ -249,124 +259,12 @@ if (NOT ANDROID_SDK_DIR)
 endif(NOT ANDROID_SDK_DIR)
 
 set(LIBJSLICENSEFILE ${CMAKE_CURRENT_SOURCE_DIR}/AGPL-3.0.txt)
-
-# This list is generated automatically, do not edit this list by hand.
-set(TYPEDLIBJSFILES
-    ${CMAKE_CURRENT_BINARY_DIR}/webodf/webodfversion.js
-    lib/runtime.js
-    lib/core/Async.js
-    lib/core/Base64.js
-    lib/core/ByteArray.js
-    lib/core/ByteArrayWriter.js
-    lib/core/CSSUnits.js
-    lib/core/DomUtils.js
-    lib/core/EventNotifier.js
-    lib/core/LoopWatchDog.js
-    lib/core/PositionIterator.js
-    lib/core/RawInflate.js
-    lib/core/ScheduledTask.js
-    lib/core/UnitTester.js
-    lib/core/Utils.js
-    lib/core/Zip.js
-    lib/gui/Avatar.js
-    lib/gui/EditInfoHandle.js
-    lib/gui/KeyboardHandler.js
-    lib/odf/Namespaces.js
-    lib/odf/OdfUtils.js
-    lib/ops/Server.js
-    lib/xmldom/LSSerializerFilter.js
-    lib/xmldom/XPath.js
-    lib/core/Cursor.js
-    lib/core/PositionFilter.js
-    lib/core/PositionFilterChain.js
-    lib/gui/AnnotationViewManager.js
-    lib/gui/HyperlinkClickHandler.js
-    lib/gui/SelectionMover.js
-    lib/odf/OdfNodeFilter.js
-    lib/odf/Style2CSS.js
-    lib/odf/StyleInfo.js
-    lib/odf/TextSerializer.js
-    lib/ops/TextPositionFilter.js
-    lib/xmldom/LSSerializer.js
-    lib/gui/MimeDataExporter.js
-    lib/gui/Clipboard.js
-    lib/odf/OdfContainer.js
-    lib/odf/FontLoader.js
-    lib/odf/ObjectNameGenerator.js
-    lib/odf/Formatting.js
-    lib/odf/OdfCanvas.js
-    lib/odf/TextStyleApplicator.js
-    lib/gui/StyleHelper.js
+# update the list of needed files
+execute_process(
+  COMMAND ${NODE} lib/runtime.js tools/updateJS.js ${CMAKE_BINARY_DIR}/jsfileslist.txt
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/webodf
 )
-# This list is generated automatically, do not edit this list by hand.
-set(UNTYPEDLIBJSFILES
-# These files depend only on files that are 100% typed.
-    lib/core/RawDeflate.js
-    lib/gui/ImageSelector.js
-    lib/odf/CommandLineTools.js
-    lib/ops/Member.js
-    lib/ops/StepsTranslator.js
-    lib/xmldom/RelaxNGParser.js
-# These files depend on files that are not 100% typed.
-    lib/ops/OdtCursor.js
-    lib/ops/OdtDocument.js
-    lib/ops/Operation.js
-    lib/xmldom/RelaxNG.js
-    lib/xmldom/RelaxNG2.js
-    lib/gui/Caret.js
-    lib/gui/EventManager.js
-    lib/gui/InputMethodEditor.js
-    lib/gui/ShadowCursor.js
-    lib/gui/UndoManager.js
-    lib/gui/UndoStateRules.js
-    lib/ops/EditInfo.js
-    lib/ops/OpAddAnnotation.js
-    lib/ops/OpAddCursor.js
-    lib/ops/OpAddMember.js
-    lib/ops/OpAddStyle.js
-    lib/ops/OpApplyDirectStyling.js
-    lib/ops/OpApplyHyperlink.js
-    lib/ops/OpInsertImage.js
-    lib/ops/OpInsertTable.js
-    lib/ops/OpInsertText.js
-    lib/ops/OpMoveCursor.js
-    lib/ops/OpRemoveAnnotation.js
-    lib/ops/OpRemoveBlob.js
-    lib/ops/OpRemoveCursor.js
-    lib/ops/OpRemoveHyperlink.js
-    lib/ops/OpRemoveMember.js
-    lib/ops/OpRemoveStyle.js
-    lib/ops/OpRemoveText.js
-    lib/ops/OpSetBlob.js
-    lib/ops/OpSetParagraphStyle.js
-    lib/ops/OpSplitParagraph.js
-    lib/ops/OpUpdateMember.js
-    lib/ops/OpUpdateMetadata.js
-    lib/ops/OpUpdateParagraphStyle.js
-    lib/ops/OperationFactory.js
-    lib/ops/OperationRouter.js
-    lib/ops/OperationTransformMatrix.js
-    lib/ops/OperationTransformer.js
-    lib/ops/TrivialOperationRouter.js
-    lib/gui/EditInfoMarker.js
-    lib/gui/PlainTextPasteboard.js
-    lib/gui/SelectionView.js
-    lib/gui/SelectionViewManager.js
-    lib/gui/SvgSelectionView.js
-    lib/gui/TrivialUndoManager.js
-    lib/ops/Session.js
-    lib/gui/AnnotationController.js
-    lib/gui/DirectParagraphStyler.js
-    lib/gui/DirectTextStyler.js
-    lib/gui/HyperlinkController.js
-    lib/gui/ImageManager.js
-    lib/gui/SelectionController.js
-    lib/gui/TextManipulator.js
-    lib/gui/SessionController.js
-    lib/gui/CaretManager.js
-    lib/gui/SessionView.js
-)
-set(LIBJSFILES ${TYPEDLIBJSFILES} ${UNTYPEDLIBJSFILES})
+include(${CMAKE_BINARY_DIR}/jsfileslist.txt)
 
 set(HTML5UIFILES
   app/app.js
@@ -390,31 +288,35 @@ set(HTML5UIFILES
 
 set (RUNTIME ${CMAKE_CURRENT_SOURCE_DIR}/webodf/lib/runtime.js)
 
+# COPY_FILES (varname srcdir tgtdir files)
+# Creates a target that copies the listed files from the srcdir to the tgtdir,
+# preserving their relative path.
+# Absolute files will be copied into the root of tgtdir without any additional subdirs
 macro(COPY_FILES _varname _srcdir _tgtdir)
   foreach(_file ${ARGN})
     if (IS_ABSOLUTE ${_file})
       SET(_subdir "")
       SET(_srcfile ${_file})
+      GET_FILENAME_COMPONENT(_dstfile ${_file} NAME)
     else (IS_ABSOLUTE ${_file})
       GET_FILENAME_COMPONENT(_subdir ${_file} PATH)
       SET(_srcfile ${_srcdir}/${_file})
+      SET(_dstfile ${_file})
     endif (IS_ABSOLUTE ${_file})
     FILE(MAKE_DIRECTORY ${_tgtdir}/${_subdir})
     add_custom_command(
-      OUTPUT ${_tgtdir}/${_file}
+      OUTPUT ${_tgtdir}/${_dstfile}
       COMMAND ${CMAKE_COMMAND} ARGS -E copy_if_different
         ${_srcfile}
-        ${_tgtdir}/${_file}
+        ${_tgtdir}/${_dstfile}
       DEPENDS
         ${_srcfile}
     )
-    set(${_varname} ${${_varname}} ${_tgtdir}/${_file})
+    set(${_varname} ${${_varname}} ${_tgtdir}/${_dstfile})
   endforeach(_file)
 endmacro(COPY_FILES _directory _files)
 
 set (VIEWERBUILDDIR ${CMAKE_CURRENT_BINARY_DIR}/viewer)
-set (WORDPRESSZIPDIR ${CMAKE_CURRENT_BINARY_DIR}/webodf-wordpress-${WEBODF_VERSION})
-set (WORDPRESSZIP ${WORDPRESSZIPDIR}.zip)
 set(WEBODFXPIDIR ${CMAKE_CURRENT_BINARY_DIR}/webodf-${WEBODF_VERSION})
 set(WEBODFXPI ${WEBODFXPIDIR}.xpi)
 
@@ -437,9 +339,6 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E remove_directory ${WEBODFZIPDIR}/editor/dojo-deps
     # benchmark
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_BINARY_DIR}/programs/benchmark ${WEBODFZIPDIR}/benchmark
-    # wordpressplugin
-    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/programs/wordpressplugin/readme.txt ${WEBODFZIPDIR}/wordpressplugin-readme.txt
-    COMMAND ${CMAKE_COMMAND} -E copy ${WORDPRESSZIP} ${WEBODFZIPDIR}
 
     # firefox
     COMMAND ${CMAKE_COMMAND} -E copy ${WEBODFXPI} ${WEBODFZIPDIR}
@@ -449,7 +348,6 @@ add_custom_command(
         ${WEBODFZIPDIR}
         ${CMAKE_CURRENT_BINARY_DIR}/${WEBODFZIP}
     DEPENDS
-        wordpress-target
         webodf-debug.js-target
         webodf.js-target
         editor-compiled.js-target

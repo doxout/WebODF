@@ -34,9 +34,6 @@
  * @source: https://github.com/kogmbh/WebODF/
  */
 /*global core, ops, gui, runtime*/
-runtime.loadClass("core.Cursor");
-runtime.loadClass("core.EventNotifier");
-runtime.loadClass("gui.SelectionMover");
 
 /**
  * @class
@@ -61,9 +58,9 @@ runtime.loadClass("gui.SelectionMover");
  *
  * @constructor
  * @param {!string} memberId The memberid this cursor is assigned to
- * @param {!ops.OdtDocument} odtDocument The document in which the cursor is placed
+ * @param {!ops.Document} document The document in which the cursor is placed
  */
-ops.OdtCursor = function OdtCursor(memberId, odtDocument) {
+ops.OdtCursor = function OdtCursor(memberId, document) {
     "use strict";
     var self = this,
         validSelectionTypes = {},
@@ -75,30 +72,12 @@ ops.OdtCursor = function OdtCursor(memberId, odtDocument) {
         events = new core.EventNotifier([ops.OdtCursor.signalCursorUpdated]);
 
     /**
-     * Remove the cursor from the odt document
+     * Remove the cursor from the document
      * @return {undefined}
      */
-    this.removeFromOdtDocument = function () {
+    this.removeFromDocument = function () {
         // TODO: find out if nodeAfterCursor, textNodeIncrease need to be dealt with in any way
         cursor.remove();
-    };
-
-    /**
-     * Move the cursor the supplied number of positions in either a forward (positive) or backwards (negative) direction
-     * @param {!number} number positions
-     * @param {boolean=} extend true if range is to be expanded from the current
-     *                      point
-     * @return {!number}
-     */
-    this.move = function (number, extend) {
-        var moved = 0;
-        if (number > 0) {
-            moved = selectionMover.movePointForward(number, extend);
-        } else if (number <= 0) {
-            moved = -selectionMover.movePointBackward(-number, extend);
-        }
-        events.emit(ops.OdtCursor.signalCursorUpdated, self);
-        return moved;
     };
 
     /**
@@ -121,6 +100,9 @@ ops.OdtCursor = function OdtCursor(memberId, odtDocument) {
         events.unsubscribe(eventid, cb);
     };
 
+    /**
+     * @return {!gui.StepCounter}
+     */
     this.getStepCounter = function () {
         return selectionMover.getStepCounter();
     };
@@ -142,7 +124,7 @@ ops.OdtCursor = function OdtCursor(memberId, odtDocument) {
      * Obtain the node representing the selection start point.
      * If a 0-length range is selected (e.g., by clicking without
      * dragging),, this will return the exact same node as getNode
-     * @returns {!Element}
+     * @return {!Element}
      */
     this.getAnchorNode = function () {
         return cursor.getAnchorNode();
@@ -172,11 +154,11 @@ ops.OdtCursor = function OdtCursor(memberId, odtDocument) {
         return cursor.hasForwardSelection();
     };
     /**
-     * Obtain the odtDocument to which the cursor corresponds.
-     * @return {!ops.OdtDocument}
+     * Obtain the document to which the cursor corresponds.
+     * @return {!ops.Document}
      */
-    this.getOdtDocument = function () {
-        return odtDocument;
+    this.getDocument = function () {
+        return document;
     };
 
     /**
@@ -209,8 +191,8 @@ ops.OdtCursor = function OdtCursor(memberId, odtDocument) {
     };
 
     function init() {
-        cursor = new core.Cursor(odtDocument.getDOM(), memberId);
-        selectionMover = new gui.SelectionMover(cursor, odtDocument.getRootNode());
+        cursor = new core.Cursor(document.getDOMDocument(), memberId);
+        selectionMover = new gui.SelectionMover(cursor, document.getRootNode());
 
         validSelectionTypes[ops.OdtCursor.RangeSelection] = true;
         validSelectionTypes[ops.OdtCursor.RegionSelection] = true;

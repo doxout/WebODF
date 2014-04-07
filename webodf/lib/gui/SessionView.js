@@ -38,9 +38,6 @@
 
 /*global Node, document, runtime, gui, ops, core */
 
-runtime.loadClass("gui.Caret");
-runtime.loadClass("ops.EditInfo");
-runtime.loadClass("gui.EditInfoMarker");
 
 /**
  * @constructor
@@ -68,7 +65,7 @@ gui.SessionViewOptions = function () {
     this.caretBlinksOnRangeSelect = true;
 };
 
-gui.SessionView = (function () {
+(function () {
     "use strict";
 
     /**
@@ -76,7 +73,7 @@ gui.SessionView = (function () {
      * is provided
      * @param {boolean} userValue
      * @param {!boolean} defaultValue
-     * @returns {!boolean}
+     * @return {!boolean}
      */
     function configOption(userValue, defaultValue) {
         return userValue !== undefined ? Boolean(userValue) : defaultValue;
@@ -88,20 +85,22 @@ gui.SessionView = (function () {
      * be matched with the memberids for which CSS is generated, to generate the same CSS
      * for shadow cursors.
      * @constructor
+     * @implements {core.Destroyable}
      * @param {!gui.SessionViewOptions} viewOptions
+     * @param {string} localMemberId
      * @param {!ops.Session} session
      * @param {!gui.CaretManager} caretManager
+     * @param {!gui.SelectionViewManager} selectionViewManager
      */
-    function SessionView(viewOptions, localMemberId, session, caretManager, selectionViewManager) {
-        var avatarInfoStyles,
+    gui.SessionView = function SessionView(viewOptions, localMemberId, session, caretManager, selectionViewManager) {
+        var /**@type{!HTMLStyleElement}*/
+            avatarInfoStyles,
             editInfons = 'urn:webodf:names:editinfo',
+            /**@type{!Object.<string,!gui.EditInfoMarker>}*/
             editInfoMap = {},
             showEditInfoMarkers = configOption(viewOptions.editInfoMarkersInitiallyVisible, true),
             showCaretAvatars = configOption(viewOptions.caretAvatarsInitiallyVisible, true),
-            blinkOnRangeSelect = configOption(viewOptions.caretBlinksOnRangeSelect, true),
-            rerenderIntervalId,
-            rerenderSelectionViews = false,
-            /**@const*/RERENDER_INTERVAL = 200; // milliseconds
+            blinkOnRangeSelect = configOption(viewOptions.caretBlinksOnRangeSelect, true);
 
         /**
          * @param {!string} nodeName
@@ -125,7 +124,7 @@ gui.SessionView = (function () {
                 nodeMatch = createAvatarInfoNodeMatch(nodeName, memberId, pseudoClass) + "{";
 
             while (node) {
-                if ((node.nodeType === Node.TEXT_NODE) && (node.data.indexOf(nodeMatch) === 0)) {
+                if (node.nodeType === Node.TEXT_NODE && /**@type{!Text}*/(node).data.indexOf(nodeMatch) === 0) {
                     return node;
                 }
                 node = node.nextSibling;
@@ -164,7 +163,11 @@ gui.SessionView = (function () {
             setStyle('span.editInfoColor', '{ background-color: ' + color + '; }', '');
             setStyle('span.editInfoAuthor', '{ content: "' + name + '"; }', ':before');
             setStyle('dc|creator', '{ background-color: ' + color + '; }', '');
-            setStyle('.selectionOverlay', '{ fill: ' + color + '; stroke: ' + color + ';}', '');
+            setStyle('.webodf-selectionOverlay', '{ fill: ' + color + '; stroke: ' + color + ';}', '');
+            // Hide the handles of non-local users
+            if (memberId === gui.ShadowCursor.ShadowCursorMemberId || memberId === localMemberId) {
+                setStyle('.webodf-touchEnabled .webodf-selectionOverlay', '{ display: block; }', ' > .webodf-draggable');
+            }
         }
 
         /**
@@ -177,17 +180,17 @@ gui.SessionView = (function () {
             var editInfo,
                 editInfoMarker,
                 id = '',
-                editInfoNode = element.getElementsByTagNameNS(editInfons, 'editinfo')[0];
+                editInfoNode = element.getElementsByTagNameNS(editInfons, 'editinfo').item(0);
 
             if (editInfoNode) {
-                id = editInfoNode.getAttributeNS(editInfons, 'id');
+                id = /**@type{!Element}*/(editInfoNode).getAttributeNS(editInfons, 'id');
                 editInfoMarker = editInfoMap[id];
             } else {
                 id = Math.random().toString();
                 editInfo = new ops.EditInfo(element, session.getOdtDocument());
                 editInfoMarker = new gui.EditInfoMarker(editInfo, showEditInfoMarkers);
 
-                editInfoNode = element.getElementsByTagNameNS(editInfons, 'editinfo')[0];
+                editInfoNode = /**@type{!Element}*/(element.getElementsByTagNameNS(editInfons, 'editinfo').item(0));
                 editInfoNode.setAttributeNS(editInfons, 'id', id);
                 editInfoMap[id] = editInfoMarker;
             }
@@ -201,7 +204,9 @@ gui.SessionView = (function () {
          * @return {undefined}
          */
         function setEditInfoMarkerVisibility(visible) {
-            var editInfoMarker, keyname;
+            var editInfoMarker,
+                /**@type{string}*/
+                keyname;
 
             for (keyname in editInfoMap) {
                 if (editInfoMap.hasOwnProperty(keyname)) {
@@ -221,7 +226,7 @@ gui.SessionView = (function () {
          * @return {undefined}
          */
         function setCaretAvatarVisibility(visible) {
-            caretManager.getCarets().forEach(function(caret) {
+            caretManager.getCarets().forEach(function (caret) {
                 if (visible) {
                     caret.showHandle();
                 } else {
@@ -331,6 +336,10 @@ gui.SessionView = (function () {
             runtime.log("+++ View here +++ eagerly created an Caret for '" + memberId + "'! +++");
         }
 
+        /**
+         * @param {!ops.OdtCursor} cursor
+         * @return {undefined}
+         */
         function onCursorMoved(cursor) {
             var memberId = cursor.getMemberId(),
                 localSelectionView = selectionViewManager.getSelectionView(localMemberId),
@@ -367,7 +376,7 @@ gui.SessionView = (function () {
         }
 
         /**
-         * @param {!Object} info
+         * @param {!{paragraphElement:!Element,memberId:string,timeStamp:number}} info
          * @return {undefined}
          */
         function onParagraphChanged(info) {
@@ -375,61 +384,37 @@ gui.SessionView = (function () {
         }
 
         /**
-         * @return {undefined}
-         */
-        function requestRerenderOfSelectionViews() {
-            rerenderSelectionViews = true;
-        }
-
-        /**
-         * Starts an interval loop that rerenders selection views and whatever else
-         * needs refreshing every RERENDER_INTERVAL milliseconds.
-         * @return {undefined}
-         */
-        function startRerenderLoop() {
-            rerenderIntervalId = runtime.getWindow().setInterval(function () {
-                if (rerenderSelectionViews) {
-                    selectionViewManager.rerenderSelectionViews();
-                    rerenderSelectionViews = false;
-                }
-            }, RERENDER_INTERVAL);
-        }
-        /**
-         * Stops the rerender loop.
-         */
-        function stopRerenderLoop() {
-            runtime.getWindow().clearInterval(rerenderIntervalId);
-        }
-
-        /**
          * @param {!function(!Object=)} callback, passing an error object in case of error
          * @return {undefined}
          */
-        this.destroy = function(callback) {
+        this.destroy = function (callback) {
             var odtDocument = session.getOdtDocument(),
-                editInfoArray = Object.keys(editInfoMap).map(function(keyname) { return editInfoMap[keyname]; });
+                /**@type{!Array.<!gui.EditInfoMarker>}*/
+                editInfoArray = Object.keys(editInfoMap).map(function (keyname) {
+                    return editInfoMap[keyname];
+                });
 
-            odtDocument.unsubscribe(ops.OdtDocument.signalMemberAdded, renderMemberData);
-            odtDocument.unsubscribe(ops.OdtDocument.signalMemberUpdated, renderMemberData);
-            odtDocument.unsubscribe(ops.OdtDocument.signalCursorAdded, onCursorAdded);
-            odtDocument.unsubscribe(ops.OdtDocument.signalCursorRemoved, onCursorRemoved);
+            odtDocument.unsubscribe(ops.Document.signalMemberAdded, renderMemberData);
+            odtDocument.unsubscribe(ops.Document.signalMemberUpdated, renderMemberData);
+            odtDocument.unsubscribe(ops.Document.signalCursorAdded, onCursorAdded);
+            odtDocument.unsubscribe(ops.Document.signalCursorRemoved, onCursorRemoved);
             odtDocument.unsubscribe(ops.OdtDocument.signalParagraphChanged, onParagraphChanged);
-            odtDocument.unsubscribe(ops.OdtDocument.signalCursorMoved, onCursorMoved);
+            odtDocument.unsubscribe(ops.Document.signalCursorMoved, onCursorMoved);
 
-            odtDocument.unsubscribe(ops.OdtDocument.signalParagraphChanged, requestRerenderOfSelectionViews);
-            odtDocument.unsubscribe(ops.OdtDocument.signalTableAdded, requestRerenderOfSelectionViews);
-            odtDocument.unsubscribe(ops.OdtDocument.signalParagraphStyleModified, requestRerenderOfSelectionViews);
-
-            stopRerenderLoop();
+            odtDocument.unsubscribe(ops.OdtDocument.signalParagraphChanged, selectionViewManager.rerenderSelectionViews);
+            odtDocument.unsubscribe(ops.OdtDocument.signalTableAdded, selectionViewManager.rerenderSelectionViews);
+            odtDocument.unsubscribe(ops.OdtDocument.signalParagraphStyleModified, selectionViewManager.rerenderSelectionViews);
 
             avatarInfoStyles.parentNode.removeChild(avatarInfoStyles);
 
-            (function destroyEditInfo(i, err){
+            (function destroyEditInfo(i, err) {
                 if (err) {
                     callback(err);
                 } else {
-                    if(i < editInfoArray.length) {
-                        editInfoArray[i].destroy(function(err){ destroyEditInfo(i+1, err);});
+                    if (i < editInfoArray.length) {
+                        editInfoArray[i].destroy(function (err) {
+                            destroyEditInfo(i + 1, err);
+                        });
                     } else {
                         callback();
                     }
@@ -439,23 +424,21 @@ gui.SessionView = (function () {
 
         function init() {
             var odtDocument = session.getOdtDocument(),
-                head = document.getElementsByTagName('head')[0];
+                head = document.getElementsByTagName('head').item(0);
 
-            odtDocument.subscribe(ops.OdtDocument.signalMemberAdded, renderMemberData);
-            odtDocument.subscribe(ops.OdtDocument.signalMemberUpdated, renderMemberData);
-            odtDocument.subscribe(ops.OdtDocument.signalCursorAdded, onCursorAdded);
-            odtDocument.subscribe(ops.OdtDocument.signalCursorRemoved, onCursorRemoved);
+            odtDocument.subscribe(ops.Document.signalMemberAdded, renderMemberData);
+            odtDocument.subscribe(ops.Document.signalMemberUpdated, renderMemberData);
+            odtDocument.subscribe(ops.Document.signalCursorAdded, onCursorAdded);
+            odtDocument.subscribe(ops.Document.signalCursorRemoved, onCursorRemoved);
             odtDocument.subscribe(ops.OdtDocument.signalParagraphChanged, onParagraphChanged);
-            odtDocument.subscribe(ops.OdtDocument.signalCursorMoved, onCursorMoved);
+            odtDocument.subscribe(ops.Document.signalCursorMoved, onCursorMoved);
 
-            startRerenderLoop();
-
-            odtDocument.subscribe(ops.OdtDocument.signalParagraphChanged, requestRerenderOfSelectionViews);
-            odtDocument.subscribe(ops.OdtDocument.signalTableAdded, requestRerenderOfSelectionViews);
-            odtDocument.subscribe(ops.OdtDocument.signalParagraphStyleModified, requestRerenderOfSelectionViews);
+            odtDocument.subscribe(ops.OdtDocument.signalParagraphChanged, selectionViewManager.rerenderSelectionViews);
+            odtDocument.subscribe(ops.OdtDocument.signalTableAdded, selectionViewManager.rerenderSelectionViews);
+            odtDocument.subscribe(ops.OdtDocument.signalParagraphStyleModified, selectionViewManager.rerenderSelectionViews);
 
             // Add a css sheet for user info-edited styling
-            avatarInfoStyles = document.createElementNS(head.namespaceURI, 'style');
+            avatarInfoStyles = /**@type{!HTMLStyleElement}*/(document.createElementNS(head.namespaceURI, 'style'));
             avatarInfoStyles.type = 'text/css';
             avatarInfoStyles.media = 'screen, print, handheld, projection';
             avatarInfoStyles.appendChild(document.createTextNode('@namespace editinfo url(urn:webodf:names:editinfo);'));
@@ -463,7 +446,5 @@ gui.SessionView = (function () {
             head.appendChild(avatarInfoStyles);
         }
         init();
-    }
-
-    return SessionView;
+    };
 }());

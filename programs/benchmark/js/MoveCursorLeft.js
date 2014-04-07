@@ -36,28 +36,36 @@
  * @source: https://github.com/kogmbh/WebODF/
  */
 
-/*global define */
+define(["BenchmarkAction"], function(BenchmarkAction) {
+    "use strict";
 
-define("webodf/editor/server/nowjs/ServerFactory", [
-    "webodf/editor/server/nowjs/Server",
-    "webodf/editor/server/nowjs/OperationRouter",
-    "webodf/editor/server/nowjs/SessionList"],
-    function (NowjsServer, NowjsOperationRouter, NowjsSessionList) {
-        "use strict";
+    /**
+     * Move cursor the requested number of steps to the left
+     * @constructor
+     * @param {!number} steps Number of steps to move the cursor
+     */
+    function MoveCursorLeft(steps) {
+        var state = {description: "Move cursor to the left (x" + steps + ")"},
+            action = new BenchmarkAction(state);
+
+        this.subscribe = action.subscribe;
+        this.state = state;
 
         /**
-        * @constructor
-        * @implements ServerFactory
-        */
-        return function NowjsServerFactory() {
-            this.createServer = function (args) {
-                return new NowjsServer();
-            };
-            this.createOperationRouter = function (sid, mid, server, odfContainer, errorCallback) {
-                return new NowjsOperationRouter(sid, mid, server);
-            };
-            this.createSessionList = function (server) {
-                return new NowjsSessionList(server);
-            };
-        };
+         * @param {!OdfBenchmarkContext} context
+         */
+        this.start = function(context) {
+            var count;
+            context.storeCurrentPosition(state);
+            action.start();
+            for (count = 0; count < steps; count += 1) {
+                context.sessionController.getSelectionController().moveCursorToLeft();
+            }
+            action.stop();
+            context.recordDistanceFromPreviousPosition(state);
+            action.complete(true);
+        }
+    }
+
+    return MoveCursorLeft;
 });

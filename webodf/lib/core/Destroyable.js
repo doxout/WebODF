@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright (C) 2013 KO GmbH <copyright@kogmbh.com>
+ * Copyright (C) 2012-2013 KO GmbH <copyright@kogmbh.com>
  *
  * @licstart
  * The JavaScript code in this page is free software: you can redistribute it
@@ -36,34 +36,21 @@
  * @source: https://github.com/kogmbh/WebODF/
  */
 
-define(["BenchmarkAction"], function(BenchmarkAction) {
+/*global core*/
+/*jslint emptyblock: true, unparam: true*/
+
+/**
+ * An operation that can be performed on a document.
+ * @interface
+ */
+core.Destroyable = function Destroyable() {
     "use strict";
+};
+/**
+ * Destroy the object.
+ * Do not access any member of this object after this call.
+ * @param {function(!Object=):undefined} callback
+ * @return {undefined}
+ */
+core.Destroyable.prototype.destroy = function (callback) {"use strict"; };
 
-    /**
-     * Remove the last character in the document via backspace or delete
-     * @param {!boolean} useBackspace Remove character via backspace or delete
-     * @constructor
-     */
-    function Remove1Position(useBackspace) {
-        var state = {description: "Remove character (" + (useBackspace ? "backspace" : "delete") + ")"},
-            action = new BenchmarkAction(state);
-
-        this.subscribe = action.subscribe;
-        this.state = state;
-
-        /**
-         * @param {!SharedState} sharedState
-         */
-        this.start = function(sharedState) {
-            action.start();
-            if (useBackspace) {
-                sharedState.sessionController.getTextManipulator().removeTextByBackspaceKey();
-            } else {
-                sharedState.sessionController.getTextManipulator().removeTextByDeleteKey();
-            }
-            action.complete(true);
-        }
-    }
-
-    return Remove1Position;
-});

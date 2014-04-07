@@ -47,14 +47,22 @@ ops.OpRemoveCursor = function OpRemoveCursor() {
 
     var memberid, timestamp;
 
+    /**
+     * @param {!ops.OpRemoveCursor.InitSpec} data
+     */
     this.init = function (data) {
         memberid = data.memberid;
         timestamp = data.timestamp;
     };
 
     this.isEdit = false;
+    this.group = undefined;
 
-    this.execute = function (odtDocument) {
+    /**
+     * @param {!ops.Document} document
+     */
+    this.execute = function (document) {
+        var odtDocument = /**@type{ops.OdtDocument}*/(document);
         if (!odtDocument.removeCursor(memberid)) {
             return false;
         }
@@ -62,6 +70,9 @@ ops.OpRemoveCursor = function OpRemoveCursor() {
         return true;
     };
 
+    /**
+     * @return {!ops.OpRemoveCursor.Spec}
+     */
     this.spec = function () {
         return {
             optype: "RemoveCursor",
@@ -76,3 +87,8 @@ ops.OpRemoveCursor = function OpRemoveCursor() {
     timestamp:number
 }}*/
 ops.OpRemoveCursor.Spec;
+/**@typedef{{
+    memberid:string,
+    timestamp:(number|undefined)
+}}*/
+ops.OpRemoveCursor.InitSpec;

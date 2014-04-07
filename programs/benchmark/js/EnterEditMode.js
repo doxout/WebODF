@@ -46,6 +46,7 @@ define(["BenchmarkAction"], function(BenchmarkAction) {
     runtime.loadClass("gui.SessionView");
     runtime.loadClass("gui.SelectionViewManager");
     runtime.loadClass("gui.ShadowCursor");
+    runtime.loadClass("gui.TrivialUndoManager");
     runtime.loadClass("ops.OpAddMember");
 
     /**
@@ -57,21 +58,22 @@ define(["BenchmarkAction"], function(BenchmarkAction) {
             action = new BenchmarkAction(state),
             localMemberId = "localmember",
             sessionControllerOptions = {
-                directStylingEnabled: true
+                directParagraphStylingEnabled: true
             },
             viewOptions = {
                 editInfoMarkersInitiallyVisible: false,
                 caretAvatarsInitiallyVisible: false,
                 caretBlinksOnRangeSelect: true
-            };
+            },
+            undoManager = new gui.TrivialUndoManager();
 
         this.subscribe = action.subscribe;
         this.state = state;
 
         /**
-         * @param {!SharedState} sharedState
+         * @param {!OdfBenchmarkContext} context
          */
-        this.start = function(sharedState) {
+        this.start = function(context) {
             var session,
                 sessionController,
                 shadowCursor,
@@ -81,9 +83,10 @@ define(["BenchmarkAction"], function(BenchmarkAction) {
 
             action.start();
 
-            session = new ops.Session(sharedState.odfCanvas);
+            session = new ops.Session(context.odfCanvas);
             shadowCursor = new gui.ShadowCursor(session.getOdtDocument());
             sessionController = new gui.SessionController(session, localMemberId, shadowCursor, sessionControllerOptions);
+            sessionController.setUndoManager(undoManager);
             caretManager = new gui.CaretManager(sessionController);
             selectionViewManager = new gui.SelectionViewManager(gui.SvgSelectionView);
             new gui.SessionView(viewOptions, localMemberId, session, caretManager, selectionViewManager);
@@ -99,9 +102,13 @@ define(["BenchmarkAction"], function(BenchmarkAction) {
             });
             session.enqueue([addMember]);
 
+            sessionController.insertLocalCursor();
             sessionController.startEditing();
-            sharedState.sessionController = sessionController;
 
+            context.session = session;
+            context.sessionController = sessionController;
+
+            action.stop();
             action.complete(true);
         };
     }

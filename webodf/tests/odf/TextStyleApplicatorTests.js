@@ -34,10 +34,6 @@
  * @source: https://github.com/kogmbh/WebODF/
  */
 /*global runtime, core, gui, odf, NodeFilter*/
-runtime.loadClass("core.DomUtils");
-runtime.loadClass("odf.Formatting");
-runtime.loadClass("odf.OdfUtils");
-runtime.loadClass("odf.TextStyleApplicator");
 /**
  * @constructor
  * @param {core.UnitTestRunner} runner
@@ -144,8 +140,7 @@ odf.TextStyleApplicatorTests = function TextStyleApplicatorTests(runner) {
      * @retur {undefined}
      */
     function applyStyle(range, info) {
-        var limits,
-            newTextNodes = domUtils.splitBoundaries(t.range),
+        var newTextNodes = domUtils.splitBoundaries(t.range),
             textNodes = odfUtils.getTextNodes(range, false),
             textStyles = new odf.TextStyleApplicator(
                 new odf.ObjectNameGenerator(/**@type{!odf.OdfContainer}*/(t.container), "tStyle"), // TODO: use the instance in SessionController
@@ -153,15 +148,7 @@ odf.TextStyleApplicatorTests = function TextStyleApplicatorTests(runner) {
                 t.container.rootElement.automaticStyles
             );
 
-        // Avoid using the passed in range as boundaries move in strange ways as the DOM is modified
-        limits = {
-            startContainer: range.startContainer,
-            startOffset: range.startOffset,
-            endContainer: range.endContainer,
-            endOffset: range.endOffset
-        };
-
-        textStyles.applyStyle(textNodes, limits, info);
+        textStyles.applyStyle(textNodes, range, info);
         newTextNodes.forEach(domUtils.normalizeTextNodes);
     }
     function apply_ContainerInsertion_SimpleTextRange() {

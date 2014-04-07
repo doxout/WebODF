@@ -38,8 +38,6 @@
 
 /*global ops, runtime, odf, core*/
 
-runtime.loadClass("odf.Namespaces");
-runtime.loadClass("core.DomUtils");
 
 /**
  * @constructor
@@ -47,8 +45,17 @@ runtime.loadClass("core.DomUtils");
  */
 ops.OpRemoveAnnotation = function OpRemoveAnnotation() {
     "use strict";
-    var memberid, timestamp, position, length, domUtils;
+    var memberid, timestamp,
+        /**@type{number}*/
+        position,
+        /**@type{number}*/
+        length,
+        /**@type{!core.DomUtils}*/
+        domUtils;
 
+    /**
+     * @param {!ops.OpRemoveAnnotation.InitSpec} data
+     */
     this.init = function (data) {
         memberid = data.memberid;
         timestamp = data.timestamp;
@@ -58,14 +65,17 @@ ops.OpRemoveAnnotation = function OpRemoveAnnotation() {
     };
 
     this.isEdit = true;
+    this.group = undefined;
 
-    this.execute = function (odtDocument) {
-        var iterator = odtDocument.getIteratorAtPosition(position),
+    /**
+     * @param {!ops.Document} document
+     */
+    this.execute = function (document) {
+        var odtDocument = /**@type{ops.OdtDocument}*/(document),
+            iterator = odtDocument.getIteratorAtPosition(position),
             container = iterator.container(),
-            annotationName,
             annotationNode,
-            annotationEnd,
-            cursors;
+            annotationEnd;
 
         while (!(container.namespaceURI === odf.Namespaces.officens
             && container.localName === 'annotation')) {
@@ -75,22 +85,21 @@ ops.OpRemoveAnnotation = function OpRemoveAnnotation() {
             return false;
         }
 
-        annotationNode = container;
-        annotationName = annotationNode.getAttributeNS(odf.Namespaces.officens, 'name');
-        if (annotationName) {
-            annotationEnd = domUtils.getElementsByTagNameNS(odtDocument.getRootNode(), odf.Namespaces.officens, 'annotation-end').filter(function (element) {
-                return annotationName === element.getAttributeNS(odf.Namespaces.officens, 'name');
-            })[0] || null;
-        }
+        annotationNode = /**@type{!odf.AnnotationElement}*/(container);
+        annotationEnd = annotationNode.annotationEndElement;
 
         // Untrack and unwrap annotation
         odtDocument.getOdfCanvas().forgetAnnotations();
 
-        // Move all cursors - outside and before the annotation node
-        cursors = domUtils.getElementsByTagNameNS(annotationNode, 'urn:webodf:names:cursor', 'cursor');
-        while (cursors.length) {
-            annotationNode.parentNode.insertBefore(cursors.pop(), annotationNode);
+        /**
+         * @param {!Node} node
+         */
+        function insert(node) {
+            /**@type{!Node}*/(annotationNode).parentNode.insertBefore(node, annotationNode);
         }
+        // Move all cursors - outside and before the annotation node
+        domUtils.getElementsByTagNameNS(annotationNode, 'urn:webodf:names:cursor', 'cursor').forEach(insert);
+        domUtils.getElementsByTagNameNS(annotationNode, 'urn:webodf:names:cursor', 'anchor').forEach(insert);
 
         // Delete start and end
         annotationNode.parentNode.removeChild(annotationNode);
@@ -105,6 +114,9 @@ ops.OpRemoveAnnotation = function OpRemoveAnnotation() {
         return true;
     };
 
+    /**
+     * @return {!ops.OpRemoveAnnotation.Spec}
+     */
     this.spec = function () {
         return {
             optype: "RemoveAnnotation",
@@ -115,3 +127,18 @@ ops.OpRemoveAnnotation = function OpRemoveAnnotation() {
         };
     };
 };
+/**@typedef{{
+    optype:string,
+    memberid:string,
+    timestamp:number,
+    position:number,
+    length:number
+}}*/
+ops.OpRemoveAnnotation.Spec;
+/**@typedef{{
+    memberid:string,
+    timestamp:(number|undefined),
+    position:number,
+    length:number
+}}*/
+ops.OpRemoveAnnotation.InitSpec;

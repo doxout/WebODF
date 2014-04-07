@@ -42,20 +42,27 @@ define(["BenchmarkAction"], function(BenchmarkAction) {
     /**
      * Insert the letter A at the current position in the document
      * @constructor
+     * @param {!number} times Number of times to insert the letter 'A'
      */
-    function InsertLetterA() {
-        var state = {description: "Insert the letter 'A'"},
+    function InsertLetterA(times) {
+        var state = {description: "Insert the letter 'A' (x" + times + ")"},
             action = new BenchmarkAction(state);
 
         this.subscribe = action.subscribe;
         this.state = state;
 
         /**
-         * @param {!SharedState} sharedState
+         * @param {!OdfBenchmarkContext} context
          */
-        this.start = function(sharedState) {
+        this.start = function(context) {
+            var count;
+            context.storeCurrentPosition(state);
             action.start();
-            sharedState.sessionController.getTextManipulator().insertText('A');
+            for (count = 0; count < times; count += 1) {
+                context.sessionController.getTextController().insertText('A');
+            }
+            action.stop();
+            context.recordDistanceFromPreviousPosition(state);
             action.complete(true);
         }
     }

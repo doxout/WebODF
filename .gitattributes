@@ -1,0 +1,24 @@
+# Set default behaviour for some text-like files, in case users don't have core.autocrlf set.
+
+
+*.cmake  text eol=native
+*.c  text eol=native
+*.conf  text eol=native
+*.cpp  text eol=native
+*.css  text eol=native
+*.h  text eol=native
+*.html  text eol=native
+*.in  text eol=native
+*.java  text eol=native
+*.js  text eol=native
+*.json  text eol=native
+*.md  text eol=native
+*.py  text eol=native
+*.qrc  text eol=native
+*.rdf  text eol=native
+*.rng  text eol=native
+*.sh  text eol=native
+*.txt  text eol=native
+*.ui  text eol=native
+*.xml  text eol=native
+*.xsl  text eol=native

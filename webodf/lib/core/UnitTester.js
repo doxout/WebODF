@@ -38,13 +38,13 @@
 
 /*jslint evil: true, continue: true, emptyblock: true, unparam: true*/
 /**
- * @typedef{{f:function(),name:!string}}
+ * @typedef{{f:function(),name:!string,expectFail:boolean}}
  */
-core.NamedFunction;
+core.TestData;
 /**
- * @typedef{{f:function(function()),name:!string}}
+ * @typedef{{f:function(function()),name:!string,expectFail:boolean}}
  */
-core.NamedAsyncFunction;
+core.AsyncTestData;
 /**
  * @interface
  */
@@ -62,11 +62,11 @@ core.UnitTest.prototype.tearDown = function () {"use strict"; };
  */
 core.UnitTest.prototype.description = function () {"use strict"; };
 /**
- * @return {!Array.<!core.NamedFunction>}
+ * @return {!Array.<!core.TestData>}
  */
 core.UnitTest.prototype.tests = function () {"use strict"; };
 /**
- * @return {!Array.<!core.NamedAsyncFunction>}
+ * @return {!Array.<!core.AsyncTestData>}
  */
 core.UnitTest.prototype.asyncTests = function () {"use strict"; };
 
@@ -104,7 +104,7 @@ core.UnitTest.cleanupTestAreaDiv = function () {
  *                      <office:document>..</office:document> tags
  * @param {!Object.<string, string>} namespaceMap Name-value pairs that map the
  *                                   prefix onto the appropriate uri namespace
- * @returns {?Document}
+ * @return {?Document}
  */
 core.UnitTest.createOdtDocument = function (xml, namespaceMap) {
     "use strict";
@@ -188,12 +188,35 @@ core.UnitTestRunner = function UnitTestRunner(resourcePrefix, logger) {
     "use strict";
     var /**@type{number}*/
         failedTests = 0,
-        areObjectsEqual;
+        /**@type{number}*/
+        failedTestsOnBeginExpectFail,
+        areObjectsEqual,
+        expectFail = false;
     /**
      * @return {string}
      */
     this.resourcePrefix = function () {
         return resourcePrefix;
+    };
+    /**
+     * @return {undefined}
+     */
+    this.beginExpectFail = function () {
+        failedTestsOnBeginExpectFail = failedTests;
+        expectFail = true;
+    };
+    /**
+     * @return {undefined}
+     */
+    this.endExpectFail = function () {
+        var hasNoFailedTests = (failedTestsOnBeginExpectFail === failedTests);
+        expectFail = false;
+
+        failedTests = failedTestsOnBeginExpectFail;
+        if (hasNoFailedTests) {
+            failedTests += 1;
+            logger.fail("Expected at least one failed test, but none registered.");
+        }
     };
     /**
      * @param {string} msg
@@ -208,7 +231,11 @@ core.UnitTestRunner = function UnitTestRunner(resourcePrefix, logger) {
      */
     function testFailed(msg) {
         failedTests += 1;
-        logger.fail(msg);
+        if (!expectFail) {
+            logger.fail(msg);
+        } else {
+            logger.debug(msg);
+        }
     }
     /**
      * @param {string} msg
@@ -458,6 +485,8 @@ core.UnitTestRunner = function UnitTestRunner(resourcePrefix, logger) {
     this.shouldBeNull = shouldBeNull;
     this.shouldBeNonNull = shouldBeNonNull;
     this.shouldBe = shouldBe;
+    this.testFailed = testFailed;
+
     /**
      * @return {!number}
      */
@@ -558,6 +587,7 @@ core.UnitTester = function UnitTester() {
             /**@type{function()|function(function())}*/
             t,
             tests,
+            texpectFail,
             lastFailCount;
 
         // check that this test has not been run or started yet
@@ -577,40 +607,69 @@ core.UnitTester = function UnitTester() {
         for (i = 0; i < tests.length; i += 1) {
             t = tests[i].f;
             tname = tests[i].name;
+            texpectFail = (tests[i].expectFail === true);
             if (testNames.length && testNames.indexOf(tname) === -1) {
                 continue;
             }
             lastFailCount = runner.countFailedTests();
             test.setUp();
             logger.startTest(testName, tname);
-            t();
+            if (texpectFail) {
+                runner.beginExpectFail();
+            }
+            try {
+                t();
+            } catch(/**@type{!Error}*/e) {
+                runner.testFailed("Unexpected exception encountered: " + e.toString() + "\n" + e.stack);
+            }
+            if (texpectFail) {
+                runner.endExpectFail();
+            }
             report(logger.endTest());
             test.tearDown();
             testResults[tname] = lastFailCount === runner.countFailedTests();
         }
         /**
-         * @param {!Array.<!core.NamedAsyncFunction>} todo
+         * @param {!Array.<!core.AsyncTestData>} todo
          * @return {undefined}
          */
         function runAsyncTests(todo) {
+            var fname,
+                expectFail;
             if (todo.length === 0) {
                 results[testName] = testResults;
                 failedTests += runner.countFailedTests();
                 callback();
                 return;
             }
-            t = todo[0].f;
-            var fname = todo[0].name;
-            lastFailCount = runner.countFailedTests();
-            test.setUp();
-            logger.startTest(testName, fname);
-            t(function () {
+            function tearDownAndRunNext() {
+                if (expectFail) {
+                    runner.endExpectFail();
+                }
                 report(logger.endTest());
                 test.tearDown();
-                testResults[fname] = lastFailCount ===
-                    runner.countFailedTests();
+                testResults[fname] = lastFailCount === runner.countFailedTests();
                 runAsyncTests(todo.slice(1));
-            });
+            }
+            t = todo[0].f;
+            fname = todo[0].name;
+            expectFail = (todo[0].expectFail === true);
+            lastFailCount = runner.countFailedTests();
+            if (testNames.length && testNames.indexOf(fname) === -1) {
+                runAsyncTests(todo.slice(1));
+            } else {
+                test.setUp();
+                logger.startTest(testName, fname);
+                if (expectFail) {
+                    runner.beginExpectFail();
+                }
+                try {
+                    t(tearDownAndRunNext);
+                } catch(/**@type{!Error}*/e) {
+                    runner.testFailed("Unexpected exception encountered: " + e.toString() + "\n" + e.stack);
+                    tearDownAndRunNext();
+                }
+            }
         }
         runAsyncTests(test.asyncTests());
     };

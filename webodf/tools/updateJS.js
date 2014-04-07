@@ -35,59 +35,20 @@
  */
 /*global runtime, process, require, console*/
 
-function Main() {
+var exitCode = 0;
+
+function Main(cmakeListPath) {
     "use strict";
     var pathModule = require("path"),
-        /**
-         * List of files that are 100% typed. When working on making WebODF more
-         * typed, choose a file from CMakeLists.txt that is listed as only
-         * depending on typed files and add it to this list. The run the
-         * typecheck-target to find where type annotations are needed.
-         */
-        typedFiles = [
-            "core/Async.js",
-            "core/Base64.js",
-            "core/ByteArray.js",
-            "core/ByteArrayWriter.js",
-            "core/CSSUnits.js",
-            "core/Cursor.js",
-            "core/DomUtils.js",
-            "core/EventNotifier.js",
-            "core/LoopWatchDog.js",
-            "core/PositionFilter.js",
-            "core/PositionFilterChain.js",
-            "core/PositionIterator.js",
-            "core/RawInflate.js",
-            "core/ScheduledTask.js",
-            "core/UnitTester.js",
-            "core/Utils.js",
-            "core/Zip.js",
-            "gui/AnnotationViewManager.js",
-            "gui/Avatar.js",
-            "gui/MimeDataExporter.js",
-            "gui/Clipboard.js",
-            "gui/EditInfoHandle.js",
-            "gui/HyperlinkClickHandler.js",
-            "gui/KeyboardHandler.js",
-            "gui/SelectionMover.js",
-            "gui/StyleHelper.js",
-            "odf/FontLoader.js",
-            "odf/Formatting.js",
-            "odf/Namespaces.js",
-            "odf/ObjectNameGenerator.js",
-            "odf/OdfCanvas.js",
-            "odf/OdfContainer.js",
-            "odf/OdfNodeFilter.js",
-            "odf/OdfUtils.js",
-            "odf/Style2CSS.js",
-            "odf/StyleInfo.js",
-            "odf/TextSerializer.js",
-            "odf/TextStyleApplicator.js",
-            "ops/Server.js",
-            "ops/TextPositionFilter.js",
-            "xmldom/LSSerializer.js",
-            "xmldom/LSSerializerFilter.js",
-            "xmldom/XPath.js"
+        fs = require("fs"),
+        buildDir = pathModule.dirname(cmakeListPath),
+        // these files are not compiled into webodf.js
+        ignoredFiles = [
+            "core/RawDeflate.js",
+            "odf/CommandLineTools.js",
+            "xmldom/RelaxNG.js",
+            "xmldom/RelaxNG2.js",
+            "xmldom/RelaxNGParser.js"
         ],
         jslintconfig;
 
@@ -102,47 +63,6 @@ function Main() {
         if (a.indexOf(value) === -1) {
             a.push(value);
         }
-    }
-
-    function addLoop(list, circs, l) {
-        var i;
-        for (i = 1; i < l; i += 1) {
-            add(circs, list[i - 1], list[i]);
-        }
-        add(circs, list[l - 1], list[0]);
-    }
-
-    /**
-     * Function to help find loops/circles in the dependency graph.
-     */
-    function findLoops(v, occs, list, circs, pos) {
-        var i, name, j, l = v.length;
-        for (i = 0; i < l; i += 1) {
-            name = v[i];
-            j = list.lastIndexOf(name, pos);
-            if (j === 0) {
-                addLoop(list, circs, pos);
-            } else if (j === -1 && occs.hasOwnProperty(name)) {
-                list[pos] = name;
-                findLoops(occs[name], occs, list, circs, pos + 1);
-            }
-        }
-    }
-
-    /**
-     * Find loops/circles in the dependency graph.
-     */
-    function findCircles(occs) {
-        var name,
-            list = [],
-            circs = {};
-        for (name in occs) {
-            if (occs.hasOwnProperty(name)) {
-                list[0] = name;
-                findLoops(occs[name], occs, list, circs, 1);
-            }
-        }
-        return circs;
     }
 
     /**
@@ -174,71 +94,62 @@ function Main() {
         return (/ \* @implements ops\.Operation\b/).test(fileContent);
     }
 
-    /**
-     * Retrieve all the classes deriving from ops.Operation..
-     */
-    function getOperations(files) {
-        return Object.keys(files).filter(function (key) {
-            return isOperation(files[key]);
-        });
+    function getStyle(path, content, colors) {
+        var constructor = content.indexOf("@constructor") !== -1,
+            iface = content.indexOf("@interface") !== -1,
+            style = (iface && !constructor) ? "\"\"" : "filled",
+            group = path.split("/"),
+            color;
+        group = group.length > 1 ? group[0] : "";
+        color = colors.indexOf(group);
+        if (color === -1) {
+            color = colors.length;
+            colors.push(group);
+        }
+        return " [color=" + (color + 1) + ", style=" + style + "];\n";
     }
 
     /**
-     * Print a .dot dependency graph.
+     * Create a dot file.
+     * This function returns a string that can be saved to a .dot file.
      */
-    function print(occs, out, files) {
-        var i, j, m, n, done = {}, d;
-        out.write("digraph webodf {\n");
+    function createDotFile(occs, files) {
+        var i, j, m, n, done = {}, out, content, colors = [];
+        out = "# This is a graphviz file.\n";
+        out += "# dot -Tsvg dependencies.dot > dependencies.svg\n";
+        out += "# dot -Tpng dependencies.dot > dependencies.png\n";
+        out += "digraph webodf {\n";
+        out += "node [colorscheme=pastel19]\n"; // pastel19, set312 or accent8
         for (i in occs) {
             if (occs.hasOwnProperty(i)) {
                 m = occs[i];
                 for (j = 0; j < m.length; j += 1) {
-                    i = isOperation(files[i]) ? "{Operation}" : i;
+                    content = files[pathModule.join("lib", i)];
+                    i = isOperation(content) ? "{Operation}" : i;
+                    if (!done[i]) {
+                        done[i] = {};
+                        out += '"' + i + '"' + getStyle(i, content, colors);
+                    }
                     n = m[j];
-                    if (occs[n].length) {
-                        n = isOperation(files[n]) ? "{Operation}" : n;
-                        if (!done.hasOwnProperty(i) || !done[i].hasOwnProperty(n)) {
-                            out.write('"' + i + '" -> "' + n + '";\n');
-                            d = done[i] = done[i] || {};
-                            d[n] = 1;
+                    content = files[pathModule.join("lib", n)];
+                    // omit leaf nodes unless they are interfaces
+                    if (occs[n].length || content.indexOf("@interface") !== -1) {
+                        n = isOperation(content) ? "{Operation}" : n;
+                        if (!done[i].hasOwnProperty(n)) {
+                            if (!done[n]) {
+                                done[n] = {};
+                                out += '"' + n + '"' + getStyle(n, content, colors);
+                            }
+                            out += '"' + i + '" -> "' + n + '";\n';
+                            done[i][n] = 1;
                         }
                     }
                 }
             }
         }
-        out.write("}\n");
+        out += "}\n";
+        return out;
     }
-
-    function mergeOperations(files, occs) {
-        var ops = getOperations(files), i, j, v;
-        for (i = 0; i < ops.length; i += 1) {
-            v = occs[i];
-            for (j = 0; j < v.length; j += 1) {
-                add(occs, "{Operations}", v[j]);
-            }
-            delete occs[i];
-        }
-    }
-
-    /**
-     * Analyze the given files and create a graphviz dependency graph.
-     */
-    this.analyze = function (files) {
-        var list = Object.keys(files),
-            occs = {},
-            classname,
-            i;
-        for (i = 0; i < list.length; i += 1) {
-            occs[list[i]] = [];
-        }
-        for (i = 0; i < list.length; i += 1) {
-            classname = list[i];
-            findOccurances(classname, [classname], files, occs);
-        }
-        mergeOperations(files, occs);
-        occs = findCircles(occs);
-        print(occs, process.stdout, files);
-    };
 
     /**
      * @param {string} path 
@@ -272,10 +183,9 @@ function Main() {
      * If the file is written anew, saveCallback is called.
      */
     function saveIfDifferent(path, content, saveCallback) {
-        var fs = require("fs");
         fs.readFile(path, "utf8", function (err, data) {
             if (err || data !== content) {
-                if (data.length !== content.length) {
+                if (!err && data.length !== content.length) {
                     console.log("Different file length for " + path
                         + ": " + data.length + " " + content.length);
                 }
@@ -298,69 +208,41 @@ function Main() {
      * @return {!Array.<string>} list
      */
     function createOrderedList(list, deps, defined) {
-        var sorted = [], i, p, l = list.length, depsPresent, missing,
-            lastLength = -1;
-        function isUndefined(dep) {
-            return !defined.hasOwnProperty(dep);
-        }
-        while (sorted.length < l && sorted.length !== lastLength) {
-            lastLength = sorted.length;
-            for (i = 0; i < l; i += 1) {
-                p = pathModule.normalize(list[i]);
-                if (!defined.hasOwnProperty(p)) {
-                    missing = deps[p].filter(isUndefined);
-                    depsPresent = missing.length === 0;
-                    if (depsPresent) {
-                        sorted.push(p);
-                        defined[p] = true;
-                    } else if (missing.length === 1 && deps[missing[0]].indexOf(p) !== -1) {
-                        // resolve simple circular problem
-                        sorted.push(p);
-                        defined[p] = true;
-                        sorted.push(missing[0]);
-                        defined[missing[0]] = true;
-                        console.log("Circular dependency: "
-                            + missing + " <> " + p);
-                    }
-                }
+        var sorted = [],
+            stack = {};
+        /**
+         * @param {string} n
+         * @param {string} parent
+         */
+        function visit(n, parent) {
+            if (defined[n]) {
+                return;
             }
-        }
-        if (sorted.length === lastLength) {
-            console.log("Unresolvable circular dependency. Check relations between ");
-            for (i = 0; i < l; i += 1) {
-                p = pathModule.normalize(list[i]);
-                if (!defined.hasOwnProperty(p)) {
-                    console.log(p);
-                }
+            if (stack[n]) {
+                throw "Circular dependency caused by " + n + " and " + parent;
             }
-            process.exit(1);
+            stack[n] = true;
+            var d = deps[n], i, l = d.length;
+            for (i = 0; i < l; i += 1) {
+                visit(d[i], n);
+            }
+            stack[n] = false;
+            defined[n] = true;
+            sorted.push(n);
         }
+        list.forEach(visit);
         return sorted;
     }
 
-    function createCMakeLists(typed, almostTyped, remaining) {
-        var fs = require("fs"), path = "../CMakeLists.txt";
-        fs.readFile(path, "utf8", function (err, content) {
-            if (err) {
-                throw err;
-            }
-            content = content.replace(/TYPEDLIBJSFILES[^)]+\)/,
-                "TYPEDLIBJSFILES\n" +
+    function createCMakeLists(typed) {
+        var path = cmakeListPath, content;
+        content = "set(LIBJSFILES\n" +
                 "    ${CMAKE_CURRENT_BINARY_DIR}/webodf/webodfversion.js\n" +
                 "    lib/runtime.js\n    lib/" +
-                typed.join("\n    lib/") + "\n)");
-            content = content.replace(/UNTYPEDLIBJSFILES[^)]+\)/,
-                "UNTYPEDLIBJSFILES" +
-                "\n# These files depend only on files that are 100% typed." +
-                "\n    lib/" +
-                almostTyped.join("\n    lib/") +
-                "\n# These files depend on files that are not 100% typed." +
-                "\n    lib/" +
-                remaining.join("\n    lib/") + "\n)");
-            saveIfDifferent(path, content, function () {
-                console.log("CMakeLists.txt was updated. Rerun the build.");
-                process.exit(1);
-            });
+                typed.join("\n    lib/") + "\n)\n";
+        saveIfDifferent(path, content, function () {
+            console.log("JS file dependencies were updated.");
+            exitCode = 1;
         });
     }
 
@@ -375,33 +257,32 @@ function Main() {
 
     function updateCMakeLists(deps) {
         var lib = deps.lib,
-            defined = {},
-            sortedTyped = createOrderedList(typedFiles, lib, defined),
-            almostTyped,
-            definedCopy,
-            remaining;
-        definedCopy = {};
-        Object.keys(defined).forEach(function (key) {
-            definedCopy[key] = true;
-        });
-        almostTyped = Object.keys(lib).filter(function (key) {
-            return !defined.hasOwnProperty(key) &&
-                lib[key].every(function (dep) {
-                    return defined.hasOwnProperty(dep);
-                });
+            sortedTyped,
+            compiledFiles;
+        compiledFiles = Object.keys(lib).filter(function (path) {
+            return ignoredFiles.indexOf(deNormalizePath(path)) === -1;
         }).sort();
-        almostTyped.forEach(function (key) {
-            defined[key] = true;
+        sortedTyped = createOrderedList(compiledFiles, lib, {});
+        createCMakeLists(sortedTyped.map(deNormalizePath));
+    }
+
+    function updateKarmaConfig(deps) {
+        var path = "tools/karma.conf.js",
+            lib = deps.lib,
+            modules = createOrderedList(Object.keys(deps.lib).sort(), lib, {});
+        fs.readFile(path, "utf8", function (err, content) {
+            if (err) {
+                throw err;
+            }
+            var re = new RegExp("// MODULES\n[^!]+!");
+            content = content.replace(re,
+                "// MODULES\n            'lib/" +
+                modules.map(deNormalizePath)
+                        .join("',\n            'lib/") + "', // !");
+            saveIfDifferent(path, content, function () {
+                console.log("karma.conf.js was updated. Rerun the build.");
+            });
         });
-        remaining = Object.keys(lib).filter(function (key) {
-            return !defined.hasOwnProperty(key);
-        });
-        remaining = createOrderedList(remaining, lib, defined);
-        createCMakeLists(
-            sortedTyped.map(deNormalizePath),
-            almostTyped.map(deNormalizePath),
-            remaining.map(deNormalizePath)
-        );
     }
 
     /**
@@ -416,15 +297,46 @@ function Main() {
             j;
         for (j = 0; j < list.length; j += 1) {
             a = manifest[list[j]];
-            out += '    "' + deNormalizePath(list[j]) + '": [\n';
+            out += '    "' + className(list[j]) + '": [\n';
             for (i = 0; i < a.length; i += 1) {
-                out += '        "' + deNormalizePath(a[i]);
+                out += '        "' + className(a[i]);
                 out += i === a.length - 1 ? '"\n' : '",\n';
             }
             out += j === list.length - 1 ? '    ]\n' : '    ],\n';
         }
         out += "}";
         return out;
+    }
+
+    /**
+     * Remove dependencies that depend on other dependencies.
+     * @param {!Object.<string,!Array.<string>>} deps
+     */
+    function reduce(deps) {
+        // return true if a depends on b
+        function dependsOn(a, b) {
+            return a === b || deps[b].some(function (c) {
+                return dependsOn(a, c);
+            });
+        }
+        Object.keys(deps).forEach(function (key) {
+            var d = deps[key],
+                i = 0,
+                dep,
+                redundant;
+            function f(a) {
+                return dep !== a && dependsOn(dep, a);
+            }
+            while (i < d.length) {
+                dep = d[i];
+                redundant = d.some(f);
+                if (redundant) {
+                    d.splice(i, 1);
+                } else {
+                    i += 1;
+                }
+            }
+        });
     }
 
     /**
@@ -484,12 +396,18 @@ function Main() {
                 d[j] = occs[classname].map(prefixDir).sort();
             }
         }
+        saveIfDifferent(pathModule.join(buildDir, "dependencies-full.dot"),
+                createDotFile(deps.lib, files));
+        reduce(deps.lib);
+        saveIfDifferent(pathModule.join(buildDir, "dependencies.dot"),
+                createDotFile(deps.lib, files));
         for (i = 0; i < dirs.length; i += 1) {
             d = dirs[i];
             j = deps[d.split(pathModule.sep)[0]];
             saveIfDifferent(d + "manifest.json", serializeManifest(j));
         }
         updateCMakeLists(deps);
+        updateKarmaConfig(deps);
     };
 
     /**
@@ -504,9 +422,7 @@ function Main() {
      * @return {undefined}
      */
     this.readFiles = function (dirs, filter, callback) {
-        var fs = require("fs"),
-            path = require("path"),
-            contents = {},
+        var contents = {},
             read;
         function readMore() {
             var done = true,
@@ -545,7 +461,7 @@ function Main() {
                 var i;
                 files.sort();
                 for (i = 0; i < files.length; i += 1) {
-                    contents[path.join(dirpath, files[i])] = undefined;
+                    contents[pathModule.join(dirpath, files[i])] = undefined;
                 }
                 contents[dirpath] = files;
                 readMore();
@@ -607,13 +523,46 @@ function Main() {
         white:      true   // if sloppy whitespace is tolerated
     };
 
+    function mkdir(path) {
+        if (fs.existsSync(path)) {
+            return;
+        }
+        var parent = pathModule.dirname(path);
+        mkdir(parent);
+        fs.mkdirSync(path);
+    }
+
+    function runJSLint(jslint, path, contents) {
+        var lpath = pathModule.join(buildDir, "jslint", path);
+        // checking jslint is quite slow, so only do it if the file content is
+        // different from the file content at the previous successful run.
+        fs.readFile(lpath, "utf8", function (err, data) {
+            if (data === contents) {
+                return;
+            }
+            var result, i, errors;
+            result = jslint(contents, jslintconfig);
+            if (result) {
+                // The file has no errors, save it so it will be skipped at the
+                // next run.
+                mkdir(pathModule.dirname(lpath));
+                fs.writeFile(lpath, contents);
+            } else {
+                errors = jslint.errors;
+                for (i = 0; i < errors.length && errors[i]; i += 1) {
+                    err = errors[i];
+                    console.log(path + ":" + err.line + ":" + err.character +
+                          ": error: " + err.reason);
+                }
+                exitCode = 1;
+            }
+        });
+    }
+
     this.runJSLint = function (contents) {
         var core = {},
             jslint,
-            result,
-            path,
-            i,
-            err;
+            path;
         // load JSLint
         /*jslint evil: true*/
         eval(contents[pathModule.normalize("lib/core/JSLint.js")]);
@@ -622,15 +571,7 @@ function Main() {
         for (path in contents) {
             if (contents.hasOwnProperty(path)
                     && typeof contents[path] === "string") {
-                result = jslint(contents[path], jslintconfig);
-                if (!result) {
-                    for (i = 0; i < jslint.errors.length && jslint.errors[i]; i += 1) {
-                        err = jslint.errors[i];
-                        console.log(path + ":" + err.line + ":" + err.character +
-                            ": error: " + err.reason);
-                    }
-                    process.exit(1);
-                }
+                runJSLint(jslint, path, contents[path]);
             }
         }
     };
@@ -657,6 +598,13 @@ function main(f) {
         });
         f.createManifestsAndCMakeLists(files, ["lib" + pathModule.sep, "tests" + pathModule.sep]);
     });
+    process.on("uncaughtException", function (err) {
+        console.log(err);
+        throw err;
+    });
+    process.on('exit', function () {
+        process.exit(exitCode);
+    });
 }
 
-main(new Main());
+main(new Main(process.argv[3]));

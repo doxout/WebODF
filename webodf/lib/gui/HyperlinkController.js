@@ -9,6 +9,9 @@
  * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU AGPL for more details.
  *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this code.  If not, see <http://www.gnu.org/licenses/>.
+ *
  * As additional permission under GNU AGPL version 3 section 7, you
  * may distribute non-source (e.g., minimized or compacted) forms of
  * that code without the copy of the GNU GPL normally required by
@@ -29,12 +32,11 @@
  * This license applies to this entire compilation.
  * @licend
  * @source: http://www.webodf.org/
- * @source: http://gitorious.org/webodf/webodf/
+ * @source: https://github.com/kogmbh/WebODF/
  */
 
 /*global runtime, core, gui, Node, ops, odf */
 
-runtime.loadClass("odf.OdfUtils");
 
 /**
  * @constructor
@@ -92,9 +94,11 @@ gui.HyperlinkController = function HyperlinkController(session, inputMemberId) {
             selectedRange = odtDocument.getCursor(inputMemberId).getSelectedRange(),
             links = odfUtils.getHyperlinkElements(selectedRange),
             removeEntireLink = selectedRange.collapsed && links.length === 1,
-            domRange = odtDocument.getDOM().createRange(),
+            domRange = odtDocument.getDOMDocument().createRange(),
             operations = [],
-            cursorRange, firstLink, lastLink, offset, op;
+            /**@type{{position: !number, length: number}}*/
+            cursorRange,
+            firstLink, lastLink, offset, op;
 
         if (links.length === 0) {
             return;
@@ -132,7 +136,7 @@ gui.HyperlinkController = function HyperlinkController(session, inputMemberId) {
                 });
                 if (cursorRange.length > 0) {
                     op = new ops.OpApplyHyperlink();
-                    op.init({
+                    /**@type{!ops.OpApplyHyperlink}*/(op).init({
                         memberid: inputMemberId,
                         position: cursorRange.position,
                         length: cursorRange.length,
@@ -155,7 +159,7 @@ gui.HyperlinkController = function HyperlinkController(session, inputMemberId) {
                 });
                 if (cursorRange.length > 0) {
                     op = new ops.OpApplyHyperlink();
-                    op.init({
+                    /**@type{!ops.OpApplyHyperlink}*/(op).init({
                         memberid: inputMemberId,
                         position: cursorRange.position,
                         length: cursorRange.length,

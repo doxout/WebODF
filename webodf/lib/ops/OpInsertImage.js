@@ -51,6 +51,9 @@ ops.OpInsertImage = function OpInsertImage() {
         textns = odf.Namespaces.textns,
         xlinkns = odf.Namespaces.xlinkns;
 
+    /**
+     * @param {!ops.OpInsertImage.InitSpec} data
+     */
     this.init = function (data) {
         memberid = data.memberid;
         timestamp = data.timestamp;
@@ -63,10 +66,11 @@ ops.OpInsertImage = function OpInsertImage() {
     };
 
     this.isEdit = true;
+    this.group = undefined;
 
     /**
-     * @param document
-     * @returns {!Element}
+     * @param {!Document} document
+     * @return {!Element}
      */
     function createFrameElement(document) {
         var imageNode = document.createElementNS(drawns, 'draw:image'),
@@ -87,8 +91,12 @@ ops.OpInsertImage = function OpInsertImage() {
         return frameNode;
     }
 
-    this.execute = function (odtDocument) {
-        var odfCanvas = odtDocument.getOdfCanvas(),
+    /**
+     * @param {!ops.Document} document
+     */
+    this.execute = function (document) {
+        var odtDocument = /**@type{ops.OdtDocument}*/(document),
+            odfCanvas = odtDocument.getOdfCanvas(),
             domPosition = odtDocument.getTextNodeAtStep(position, memberid),
             textNode, refNode, paragraphElement, frameElement;
 
@@ -100,7 +108,7 @@ ops.OpInsertImage = function OpInsertImage() {
         paragraphElement = odtDocument.getParagraphElement(textNode);
         refNode = domPosition.offset !== textNode.length ?
             textNode.splitText(domPosition.offset) : textNode.nextSibling;
-        frameElement = createFrameElement(odtDocument.getDOM());
+        frameElement = createFrameElement(odtDocument.getDOMDocument());
         textNode.parentNode.insertBefore(frameElement, refNode);
         odtDocument.emit(ops.OdtDocument.signalStepsInserted, {position: position, length: 1});
 
@@ -120,6 +128,9 @@ ops.OpInsertImage = function OpInsertImage() {
         return true;
     };
 
+    /**
+     * @return {!ops.OpInsertImage.Spec}
+     */
     this.spec = function () {
         return {
             optype: "InsertImage",
@@ -133,5 +144,27 @@ ops.OpInsertImage = function OpInsertImage() {
             frameName: frameName
         };
     };
-
 };
+/**@typedef{{
+    optype:string,
+    memberid:string,
+    timestamp:number,
+    filename:string,
+    position:number,
+    frameWidth:string,
+    frameHeight:string,
+    frameStyleName:string,
+    frameName:string
+}}*/
+ops.OpInsertImage.Spec;
+/**@typedef{{
+    memberid:string,
+    timestamp:(number|undefined),
+    filename:string,
+    position:number,
+    frameWidth:string,
+    frameHeight:string,
+    frameStyleName:string,
+    frameName:string
+}}*/
+ops.OpInsertImage.InitSpec;

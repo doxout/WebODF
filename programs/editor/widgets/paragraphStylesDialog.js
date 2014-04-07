@@ -51,21 +51,16 @@ define("webodf/editor/widgets/paragraphStylesDialog", [], function () {
                 "dijit/Dialog",
                 "dijit/TooltipDialog",
                 "dijit/popup",
+                "dijit/layout/LayoutContainer",
                 "dijit/layout/TabContainer",
                 "dijit/layout/ContentPane",
                 "dijit/form/Button",
-                "dijit/form/DropDownButton",
-                "dijit/form/RadioButton"], function (Dialog, TooltipDialog, popup, TabContainer, ContentPane, Button, DropDownButton, RadioButton) {
+                "dijit/form/DropDownButton"], function (Dialog, TooltipDialog, popup, LayoutContainer, TabContainer, ContentPane, Button, DropDownButton) {
                 var i,
                     tr = runtime.tr,
+                    mainLayoutContainer,
                     tabContainer,
-                    flowPane,
-                    numberingPane,
-                    tabsPane,
-                    capsPane,
-                    bordersPane,
-                    backgroundPane,
-                    indentsPane,
+                    topBar,
                     actionBar,
                     okButton,
                     cancelButton,
@@ -73,7 +68,6 @@ define("webodf/editor/widgets/paragraphStylesDialog", [], function () {
                     deleteButton,
                     cloneTooltip,
                     cloneDropDown,
-                    newStyleName = null,
                     /**
                     * Mapping of the properties from edit pane properties to the attributes of style:text-properties
                     * @const@type{Array.<!{propertyName:string,attributeName:string,unit:string}>}
@@ -129,14 +123,16 @@ define("webodf/editor/widgets/paragraphStylesDialog", [], function () {
                     }, {
                         propertyName:  'textAlign',
                         attributeName: 'fo:text-align'
-                    }];
+                    }],
+                    originalFontEffectsPaneValue,
+                    originalAlignmentPaneValue;
 
                 /**
                 * Sets attributes of a node by the properties of the object properties,
                 * based on the mapping defined in propertyMapping.
                 * @param {!Object} properties
                 * @param {!Array.<!{propertyName:string,attributeName:string,unit:string}>} propertyMapping
-                * @return {undefined}
+                * @return {!Object}
                 */
                 function mappedProperties(properties, propertyMapping) {
                     var i, m, value,
@@ -153,10 +149,33 @@ define("webodf/editor/widgets/paragraphStylesDialog", [], function () {
                     return result;
                 }
 
+                /**
+                 * Returns an flat object containing only the key-value mappings
+                 * from the 'new' flat object which are different from the 'old' object's.
+                 * @param {!Object} oldProperties
+                 * @param {!Object} newProperties
+                 * @return {!Object}
+                 */
+                function updatedProperties(oldProperties, newProperties) {
+                    var properties = {};
+                    Object.keys(newProperties).forEach(function (key) {
+                        if (newProperties[key] !== oldProperties[key]) {
+                            properties[key] = newProperties[key];
+                        }
+                    });
+                    return properties;
+                }
+
                 function accept() {
                     editorSession.updateParagraphStyle(stylePicker.value(), {
-                        "style:paragraph-properties": mappedProperties(alignmentPane.value(), paragraphPropertyMapping),
-                        "style:text-properties": mappedProperties(fontEffectsPane.value(), textPropertyMapping)
+                        "style:paragraph-properties": mappedProperties(
+                                                        updatedProperties(originalAlignmentPaneValue, alignmentPane.value()),
+                                                        paragraphPropertyMapping
+                                                     ),
+                        "style:text-properties": mappedProperties(
+                                                    updatedProperties(originalFontEffectsPaneValue, fontEffectsPane.value()),
+                                                    textPropertyMapping
+                                                 )
                     });
 
                     dialog.hide();
@@ -164,6 +183,24 @@ define("webodf/editor/widgets/paragraphStylesDialog", [], function () {
 
                 function cancel() {
                     dialog.hide();
+                }
+
+                function setStyle(value) {
+                    if (value !== stylePicker.value()) {
+                        stylePicker.setValue(value);
+                    }
+
+                    alignmentPane.setStyle(value);
+                    fontEffectsPane.setStyle(value);
+                    originalAlignmentPaneValue = alignmentPane.value();
+                    originalFontEffectsPaneValue = fontEffectsPane.value();
+
+                    // If it is a default (nameless) style or is used, make it undeletable.
+                    if (value === "" || editorSession.isStyleUsed(editorSession.getParagraphStyleElement(value))) {
+                        deleteButton.domNode.style.display = 'none';
+                    } else {
+                        deleteButton.domNode.style.display = 'block';
+                    }
                 }
 
                 /**
@@ -174,7 +211,8 @@ define("webodf/editor/widgets/paragraphStylesDialog", [], function () {
                 * @param {!string} newStyleDisplayName display name of the new style
                 */
                 function cloneStyle(styleName, newStyleDisplayName) {
-                    newStyleName = editorSession.cloneParagraphStyle(styleName, newStyleDisplayName);
+                    var newStyleName = editorSession.cloneParagraphStyle(styleName, newStyleDisplayName);
+                    setStyle(newStyleName);
                 }
 
                 function deleteStyle(styleName) {
@@ -184,6 +222,16 @@ define("webodf/editor/widgets/paragraphStylesDialog", [], function () {
                 dialog = new Dialog({
                     title: tr("Paragraph Styles")
                 });
+
+                mainLayoutContainer = new LayoutContainer({
+                    style: "height: 520px; width: 450px;"
+                });
+
+                topBar = new ContentPane({
+                    region: "top",
+                    style: "margin: 0; padding: 0"
+                });
+                mainLayoutContainer.addChild(topBar);
 
                 cloneTooltip = new TooltipDialog({
                     content:
@@ -207,7 +255,7 @@ define("webodf/editor/widgets/paragraphStylesDialog", [], function () {
                     dropDown: cloneTooltip,
                     style: "float: right; margin-bottom: 5px;"
                 });
-                dialog.addChild(cloneDropDown, 1);
+                topBar.addChild(cloneDropDown, 1);
 
                 deleteButton = new Button({
                     label: tr("Delete"),
@@ -218,13 +266,13 @@ define("webodf/editor/widgets/paragraphStylesDialog", [], function () {
                         deleteStyle(stylePicker.value());
                     }
                 });
-                dialog.addChild(deleteButton, 2);
+                topBar.addChild(deleteButton, 2);
 
                 // Tab Container
                 tabContainer = new TabContainer({
-                    style: "height: 100%; width: 100%;"
+                    region: "center"
                 });
-                dialog.addChild(tabContainer, 3);
+                mainLayoutContainer.addChild(tabContainer);
 
                 actionBar = dojo.create("div", {
                     "class": "dijitDialogPaneActionBar"
@@ -247,38 +295,23 @@ define("webodf/editor/widgets/paragraphStylesDialog", [], function () {
                 ], function (ParagraphStyles, AlignmentPane, FontEffectsPane) {
                     var p, a, f;
 
-                    function openStyle(value) {
-                        alignmentPane.setStyle(value);
-                        fontEffectsPane.setStyle(value);
-                        // If it is a default (nameless) style or is used, make it undeletable.
-                        if (value === "" || editorSession.isStyleUsed(editorSession.getParagraphStyleElement(value))) {
-                            deleteButton.domNode.style.display = 'none';
-                        } else {
-                            deleteButton.domNode.style.display = 'block';
-                        }
-                    }
-
                     p = new ParagraphStyles(function (paragraphStyles) {
                         stylePicker = paragraphStyles;
                         stylePicker.widget().startup();
                         stylePicker.widget().domNode.style.float = "left";
                         stylePicker.widget().domNode.style.width = "350px";
                         stylePicker.widget().domNode.style.marginTop = "5px";
-                        dialog.addChild(stylePicker.widget(), 0);
-
-                        stylePicker.onAdd = function (name) {
-                            if (newStyleName === name) {
-                                stylePicker.setValue(name);
-                                newStyleName = null; // reset 'flag' name
-                            }
-                        };
+                        topBar.addChild(stylePicker.widget(), 0);
 
                         stylePicker.onRemove = function (name) {
-                            // Set the first style name as current
-                            stylePicker.setValue(stylePicker.widget().getOptions(0));
+                            // The style picker automatically falls back
+                            // to the first entry if the currently selected
+                            // entry is deleted. So it is safe to simply
+                            // open the new auto-selected entry after removal.
+                            setStyle(stylePicker.value());
                         };
 
-                        stylePicker.onChange = openStyle;
+                        stylePicker.onChange = setStyle;
                         stylePicker.setEditorSession(editorSession);
                     });
                     a = new AlignmentPane(function (pane) {
@@ -296,20 +329,14 @@ define("webodf/editor/widgets/paragraphStylesDialog", [], function () {
 
                     dialog.onShow = function () {
                         var currentStyle = editorSession.getCurrentParagraphStyle();
-                        // setting the stylepicker value if the style name is the same
-                        // will not trigger onChange, so specifically open the style in
-                        // the panes.
-                        if (stylePicker.value() === currentStyle) {
-                            openStyle(currentStyle);
-                        } else {
-                            stylePicker.setValue(currentStyle);
-                        }
+                        setStyle(currentStyle);
                     };
 
                     dialog.onHide = self.onToolDone;
                 });
 
-                tabContainer.startup();
+                dialog.addChild(mainLayoutContainer);
+                mainLayoutContainer.startup();
 
                 return callback(dialog);
             });

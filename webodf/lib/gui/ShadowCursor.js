@@ -35,7 +35,6 @@
  */
 /*global core, gui, ops, runtime*/
 
-runtime.loadClass("gui.SelectionMover");
 
 /**
  * @class
@@ -44,15 +43,16 @@ runtime.loadClass("gui.SelectionMover");
  * simulating a Cursor when you cannot/should not use a real cursor.
  * 
  * @constructor
- * @param {!ops.OdtDocument} odtDocument
+ * @param {!ops.Document} document
  */
-gui.ShadowCursor = function ShadowCursor(odtDocument) {
+gui.ShadowCursor = function ShadowCursor(document) {
     "use strict";
-    var selectedRange = /**@type{!Range}*/(odtDocument.getDOM().createRange()),
+    var /**@type{!Range}*/
+        selectedRange = /**@type{!Range}*/(document.getDOMDocument().createRange()),
         forwardSelection = true;
 
     /*jslint emptyblock: true*/
-    this.removeFromOdtDocument = function () {};
+    this.removeFromDocument = function () {};
     /*jslint emptyblock: false*/
 
     /**
@@ -93,24 +93,24 @@ gui.ShadowCursor = function ShadowCursor(odtDocument) {
     };
 
     /**
-     * Obtain the odtDocument to which the cursor corresponds.
-     * @return {!ops.OdtDocument}
+     * Obtain the document to which the cursor corresponds.
+     * @return {!ops.Document}
      */
-    this.getOdtDocument = function () {
-        return odtDocument;
+    this.getDocument = function () {
+        return document;
     };
 
     /**
      * Gets the current selection type. For a shadow cursor, this value is always
      * ops.OdtCursor.RangeSelection
-     * @returns {!string}
+     * @return {!string}
      */
     this.getSelectionType = function () {
         return ops.OdtCursor.RangeSelection;
     };
 
     function init() {
-        selectedRange.setStart(odtDocument.getRootNode(), 0);
+        selectedRange.setStart(document.getRootNode(), 0);
     }
     init();
 };

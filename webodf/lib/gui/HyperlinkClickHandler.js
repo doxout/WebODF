@@ -9,6 +9,9 @@
  * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU AGPL for more details.
  *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this code.  If not, see <http://www.gnu.org/licenses/>.
+ *
  * As additional permission under GNU AGPL version 3 section 7, you
  * may distribute non-source (e.g., minimized or compacted) forms of
  * that code without the copy of the GNU GPL normally required by
@@ -29,34 +32,35 @@
  * This license applies to this entire compilation.
  * @licend
  * @source: http://www.webodf.org/
- * @source: http://gitorious.org/webodf/webodf/
+ * @source: https://github.com/kogmbh/WebODF/
  */
 
 /*global runtime, gui, odf, xmldom */
 
-runtime.loadClass("odf.Namespaces");
-runtime.loadClass("odf.OdfUtils");
-runtime.loadClass("xmldom.XPath");
 
 /**
  * @constructor
- * @param {!function():!Element} getRootNode
+ * @implements {core.Destroyable}
+ * @param {!function():!HTMLElement} getContainer Fetch the surrounding HTML container
+ * @param {!gui.KeyboardHandler} keyDownHandler
+ * @param {!gui.KeyboardHandler} keyUpHandler
  */
-gui.HyperlinkClickHandler = function HyperlinkClickHandler(getRootNode) {
+gui.HyperlinkClickHandler = function HyperlinkClickHandler(getContainer, keyDownHandler, keyUpHandler) {
     "use strict";
     var /**@const
          @type{!string}*/
-        webodfns = "urn:webodf:names:helper",
-        /**@const
-         @type{!string}*/
-        links = "links",
-        /**@const
-         @type{!string}*/
-        inactive = "inactive",
-        odfUtils = new odf.OdfUtils(),
+        inactiveLinksCssClass = "webodf-inactiveLinks",
+        modifier = gui.KeyboardHandler.Modifier,
+        keyCode = gui.KeyboardHandler.KeyCode,
         xpath = xmldom.XPath,
-        /**@type{!boolean}*/
-        editing = false;
+        odfUtils = new odf.OdfUtils(),
+        window = /**@type{!Window}*/(runtime.getWindow()),
+        /**@type{!number}*/
+        activeModifier = modifier.None,
+        /**@type{!Array.<!{keyCode: !number, modifier: !number}>}*/
+        activeKeyBindings = [];
+
+    runtime.assert(window !== null, "Expected to be run in an environment which has a global window, like a browser.");
 
     /**
      * @param {?Node} node
@@ -77,15 +81,24 @@ gui.HyperlinkClickHandler = function HyperlinkClickHandler(getRootNode) {
 
     /**
      * @param {!Event} e
+     * @return {undefined}
      */
     this.handleClick = function (e) {
         var target = e.target || e.srcElement,
+            pressedModifier,
             linkElement,
+            /**@type{!string}*/
             url,
             rootNode,
             bookmarks;
 
-        if (editing && !e.ctrlKey && !e.metaKey) {
+        if (e.ctrlKey) {
+            pressedModifier = modifier.Ctrl;
+        } else if (e.metaKey) {
+            pressedModifier = modifier.Meta;
+        }
+
+        if (activeModifier !== modifier.None && activeModifier !== pressedModifier) {
             return;
         }
 
@@ -95,13 +108,13 @@ gui.HyperlinkClickHandler = function HyperlinkClickHandler(getRootNode) {
         }
 
         url = odfUtils.getHyperlinkTarget(linkElement);
-        if (!url) {
+        if (url === "") {
             return;
         }
 
         if (url[0] === '#') { // bookmark
             url = url.substring(1);
-            rootNode = /** @type {!Element} */(getRootNode());
+            rootNode = getContainer();
             bookmarks = xpath.getODFElementsWithXPath(rootNode,
                 "//text:bookmark-start[@text:name='" + url + "']",
                 odf.Namespaces.lookupNamespaceURI);
@@ -117,36 +130,120 @@ gui.HyperlinkClickHandler = function HyperlinkClickHandler(getRootNode) {
             }
         } else {
             // Ask the browser to open the link in a new window.
-            runtime.getWindow().open(url);
+            window.open(url);
+        }
+
+        if (e.preventDefault) {
+            e.preventDefault();
+        } else {
+            e.returnValue = false;
         }
     };
 
     /**
      * Show pointer cursor when hover over hyperlink
+     * @return {undefined}
      */
     function showPointerCursor() {
-        getRootNode().removeAttributeNS(webodfns, links);
+        var container = getContainer();
+        runtime.assert(Boolean(container.classList), "Document container has no classList element");
+        container.classList.remove(inactiveLinksCssClass);
     }
-    this.showPointerCursor = showPointerCursor;
 
     /**
      * Show text cursor when hover over hyperlink
+     * @return {undefined}
      */
     function showTextCursor() {
-        getRootNode().setAttributeNS(webodfns, links, inactive);
+        var container = getContainer();
+        runtime.assert(Boolean(container.classList), "Document container has no classList element");
+        container.classList.add(inactiveLinksCssClass);
     }
-    this.showTextCursor = showTextCursor;
 
     /**
-     * Sets to true when in edit mode; otherwise false
-     * @param {!boolean} value
+     * Remove all currently subscribed keyboard shortcuts & window events
+     * @return {undefined}
      */
-    this.setEditing = function (value) {
-        editing = value;
-        if (editing) {
+    function cleanupEventBindings() {
+        window.removeEventListener("focus", showTextCursor, false);
+        activeKeyBindings.forEach(function(boundShortcut) {
+            keyDownHandler.unbind(boundShortcut.keyCode, boundShortcut.modifier);
+            keyUpHandler.unbind(boundShortcut.keyCode, boundShortcut.modifier);
+        });
+        activeKeyBindings.length = 0;
+    }
+
+    /**
+     * @param {!number} modifierKey
+     * @return {undefined}
+     */
+    function bindEvents(modifierKey) {
+        cleanupEventBindings();
+
+        if (modifierKey !== modifier.None) {
+            // Cursor style needs to be reset when the window loses focus otherwise the cursor hand will remain
+            // permanently on in some browsers due to the focus being switched and the keyup event never being received.
+            // eventManager binds to the focus event on both eventTrap and window, but we only specifically want
+            // the window focus event.
+            window.addEventListener("focus", showTextCursor, false);
+
+            switch (modifierKey) {
+                case modifier.Ctrl:
+                    activeKeyBindings.push({keyCode: keyCode.Ctrl, modifier: modifier.None});
+                    break;
+                case modifier.Meta:
+                    activeKeyBindings.push({keyCode: keyCode.LeftMeta, modifier: modifier.None});
+                    activeKeyBindings.push({keyCode: keyCode.RightMeta, modifier: modifier.None});
+                    activeKeyBindings.push({keyCode: keyCode.MetaInMozilla, modifier: modifier.None});
+                    break;
+            }
+
+            activeKeyBindings.forEach(function(boundShortcut) {
+                keyDownHandler.bind(boundShortcut.keyCode, boundShortcut.modifier, showPointerCursor);
+                keyUpHandler.bind(boundShortcut.keyCode, boundShortcut.modifier, showTextCursor);
+            });
+        }
+    }
+
+    /**
+     * Sets the modifier key for activating the hyperlink.
+     * @param {!number} value
+     * @return {undefined}
+     */
+    this.setModifier = function (value) {
+        if (activeModifier === value) {
+            return;
+        }
+        runtime.assert(value === modifier.None || value === modifier.Ctrl || value === modifier.Meta,
+            "Unsupported KeyboardHandler.Modifier value: " + value);
+
+        activeModifier = value;
+        if (activeModifier !== modifier.None) {
             showTextCursor();
         } else {
             showPointerCursor();
         }
+        bindEvents(activeModifier);
+    };
+
+    /**
+     * Get the currently active modifier key. This will be equivalent to a value
+     * found in gui.KeyboardHandler.Modifier
+     * @return {!number}
+     */
+    this.getModifier = function() {
+        return activeModifier;
+    };
+    
+    /**
+     * Destroy the object.
+     * Do not access any member of this object after this call.
+     * @param {function(!Object=):undefined} callback
+     * @return {undefined}
+     */
+    this.destroy = function(callback) {
+        showTextCursor();
+        cleanupEventBindings();
+        callback();
     };
 };

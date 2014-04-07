@@ -12,7 +12,8 @@
     xmlns:wo="urn:webodf:names:scope"
     xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
     xmlns:xlink="http://www.w3.org/1999/xlink"
-    xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0">
+    xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0"
+    xmlns:foreign="urn:operationtests:foreign">
 <test name="AddCursor_Simple">
   <before><office:text><text:p/></office:text></before>
   <ops>
@@ -99,6 +100,32 @@
    <op optype="RemoveCursor" memberid="Joe"/>
   </ops>
   <after><office:text><text:p/></office:text></after>
+ </test>
+ <test name="MoveCursor_OverImageAnchoredAsCharInStyle" isFailing="true">
+  <before>
+   <office:automatic-styles>
+   <style:style style:name="Graphics" style:family="graphic">
+     <style:graphic-properties text:anchor-type="as-char"/>
+    </style:style>
+   </office:automatic-styles>
+   <office:text>
+    <text:p><draw:frame draw:style-name="Graphics"/></text:p>
+   </office:text>
+  </before>
+  <ops>
+   <op optype="AddCursor" memberid="Joe"/>
+   <op optype="MoveCursor" memberid="Joe" position="1"/>
+  </ops>
+  <after>
+   <office:automatic-styles>
+    <style:style style:name="Graphics" style:family="graphic">
+     <style:graphic-properties text:anchor-type="as-char"/>
+    </style:style>
+   </office:automatic-styles>
+   <office:text>
+    <text:p><draw:frame draw:style-name="Graphics"/><c:cursor c:memberId="Joe"/></text:p>
+   </office:text>
+  </after>
  </test>
 
  <test name="InsertText_Simple">
@@ -331,6 +358,13 @@
   </ops>
   <after><office:text><text:p/></office:text></after>
  </test>
+ <test name="RemoveText_SurroundingCursor">
+  <before><office:text><text:p>a<c:cursor>b</c:cursor>c</text:p></office:text></before>
+  <ops>
+   <op optype="RemoveText" position="0" length="2"/>
+  </ops>
+  <after><office:text><text:p><c:cursor>b</c:cursor></text:p></office:text></after>
+ </test>
  <test name="AddRemoveSpace">
   <before><office:text><text:p>ab</text:p></office:text></before>
   <ops>
@@ -506,7 +540,7 @@
    <op optype="MoveCursor" memberid="Bob" position="1"/>
    <op optype="RemoveText" position="1" length="1"/>
   </ops>
-  <after><office:text><text:p>a<e:editinfo e:id="A"/><c:cursor c:memberId="Bob"/>c</text:p></office:text></after>
+  <after><office:text><text:p>a<c:cursor c:memberId="Bob"/><e:editinfo e:id="A"/>c</text:p></office:text></after>
  </test>
  <test name="Remove_DeleteTabs">
   <before><office:text><text:p><text:span><text:tab>&#09;</text:tab><text:tab>&#09;</text:tab></text:span></text:p></office:text></before>
@@ -567,6 +601,13 @@
    <op optype="RemoveText" position="0" length="1"/>
   </ops>
   <after><office:text><text:p text:style-name="B">efgh</text:p></office:text></after>
+ </test>
+ <test name="Remove_deleteMergeEmpty_WithNonOdfChildren">
+  <before><office:text><text:p text:style-name="A"><foreign:test foreign:id="1"/><foreign:test foreign:id="2"/></text:p><text:p text:style-name="B"><foreign:test foreign:id="3"/>efgh<foreign:test foreign:id="4"/></text:p></office:text></before>
+  <ops>
+   <op optype="RemoveText" position="0" length="1"/>
+  </ops>
+  <after><office:text><text:p text:style-name="B"><foreign:test foreign:id="1"/><foreign:test foreign:id="2"/><foreign:test foreign:id="3"/>efgh<foreign:test foreign:id="4"/></text:p></office:text></after>
  </test>
  <test name="Remove_deleteLink1">
   <before><office:text><text:p><text:a xlink:type="simple" xlink:href="http://www.hello.com"><text:span>Hello</text:span></text:a></text:p></office:text></before>
@@ -793,6 +834,15 @@
    <op optype="SplitParagraph" memberid="Bob" position="5" moveCursor="true"/>
   </ops>
   <after><office:text><text:p>hell<text:span text:style-name="bold">o</text:span></text:p><text:p><text:span text:style-name="bold"><c:cursor c:memberId="Bob"/>w</text:span>orld</text:p></office:text></after>
+ </test>
+ <test name="SplitParagraph_AtEndOfStyledSpan_PreservesStyling" isFailing="true">
+  <before><office:text><text:p><text:span text:style-name="bold">hello</text:span></text:p></office:text></before>
+  <ops>
+   <op optype="AddCursor" memberid="Bob"/>
+   <op optype="MoveCursor" memberid="Bob" position="5"/>
+   <op optype="SplitParagraph" memberid="Bob" position="5"/>
+  </ops>
+  <after><office:text><text:p><text:span text:style-name="bold">hello</text:span></text:p><text:p><text:span text:style-name="bold"><c:cursor c:memberId="Bob"/></text:span></text:p></office:text></after>
  </test>
  <test name="SplitParagraph_EmptyParagraph">
   <!-- Reproduces a caching bug caused by the new paragraph being inserted before the existing one -->
@@ -1156,7 +1206,7 @@
  <test name="ApplyDirectStyling_WithinNonSpanContainer">
   <before>
    <office:automatic-styles/>
-   <office:text><text:p><html:span class="annotationHighlight">ABCD</html:span></text:p></office:text>
+   <office:text><text:p><html:span class="webodf-annotationHighlight">ABCD</html:span></text:p></office:text>
   </before>
   <ops>
    <op optype="ApplyDirectStyling" memberid="Alice" position="1" length="2">
@@ -1165,8 +1215,19 @@
   </ops>
   <after>
    <office:automatic-styles><style:style style:name="auto63350368_0" wo:scope="document-content" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style></office:automatic-styles>
-   <office:text><text:p><html:span class="annotationHighlight">A<text:span text:style-name="auto63350368_0">BC</text:span>D</html:span></text:p></office:text>
+   <office:text><text:p><html:span class="webodf-annotationHighlight">A<text:span text:style-name="auto63350368_0">BC</text:span>D</html:span></text:p></office:text>
   </after>
+ </test>
+ <test name="SelectionWithDirectsStyling">
+  <before><office:text><text:p>ABC</text:p></office:text></before>
+  <ops>
+   <op optype="AddCursor" memberid="Joe"/>
+   <op optype="MoveCursor" memberid="Joe" position="0" length="2"/>
+   <op optype="ApplyDirectStyling" memberid="Alice" position="0" length="2">
+    <setProperties><style:text-properties fo:font-weight="bold" /></setProperties>
+   </op>
+  </ops>
+  <after><office:text><text:p><text:span text:style-name="auto63350368_0"><c:anchor c:memberId="Joe"/>AB<c:cursor c:memberId="Joe"/></text:span>C</text:p></office:text></after>
  </test>
 
  <test name="AddAnnotation_simple">
@@ -1241,7 +1302,7 @@
    <office:text><text:p>ABC<office:annotation office:name="alice_2"><dc:creator e:memberid="Alice">Alice</dc:creator><dc:date>2013-08-05T12:34:07.061Z</dc:date><text:list><text:list-item><text:p></text:p></text:list-item></text:list></office:annotation><office:annotation office:name="alice_1"><dc:creator e:memberid="Alice">Alice</dc:creator><dc:date>2013-08-05T12:34:07.061Z</dc:date><text:list><text:list-item><text:p></text:p></text:list-item></text:list></office:annotation>D</text:p><text:p>EFG<text:span>H<office:annotation-end office:name="alice_1"/>IJ</text:span></text:p></office:text>
   </after>
  </test>
- <test name="RemoveAnnotation_ranged">
+ <test name="RemoveAnnotation_ranged" hasSetup="true">
   <before>
    <office:text><text:p>ABC<office:annotation office:name="alice_2"><dc:creator e:memberid="Alice">Alice</dc:creator><dc:date>2013-08-05T12:34:07.061Z</dc:date><text:list><text:list-item><text:p>xyz</text:p></text:list-item></text:list></office:annotation>D</text:p><text:p>EFG<text:span>H<office:annotation-end office:name="alice_2"/>IJ</text:span></text:p></office:text>
   </before>
@@ -1263,6 +1324,59 @@
   </ops>
   <after>
    <office:text><text:p>ABCD</text:p><text:p>EFG<text:span>HIJ</text:span></text:p></office:text>
+  </after>
+ </test>
+ <test name="RemoveAnnotation_preservesExpandedCursor">
+  <before>
+   <office:text><text:p>ABC<office:annotation office:name="alice_2"><dc:creator e:memberid="Alice"/><dc:date>2013-08-05T12:34:07.061Z</dc:date><text:list><text:list-item><text:p></text:p></text:list-item></text:list></office:annotation>D</text:p><text:p>EFG<text:span>HIJ</text:span></text:p></office:text>
+  </before>
+  <ops>
+   <op optype="AddCursor" memberid="Alice" position="0" />
+   <op optype="MoveCursor" memberid="Alice" position="4" length="1" />
+   <op optype="RemoveAnnotation" memberid="Alice" position="4" length="0" />
+  </ops>
+  <after>
+   <office:text><text:p>ABC<c:cursor c:memberId="Alice"/>D</text:p><text:p>EFG<text:span>HIJ</text:span></text:p></office:text>
+  </after>
+ </test>
+ <test name="RemoveAnnotation_preservesExpandedCursor_2">
+  <before>
+   <office:text><text:p>ABC<office:annotation office:name="alice_2"><dc:creator e:memberid="Alice"/><dc:date>2013-08-05T12:34:07.061Z</dc:date><text:list><text:list-item><text:p></text:p></text:list-item></text:list></office:annotation>D</text:p><text:p>EFG<text:span>HIJ</text:span></text:p></office:text>
+  </before>
+  <ops>
+   <op optype="AddCursor" memberid="Alice" position="0" />
+   <op optype="MoveCursor" memberid="Alice" position="2" length="3" />
+   <op optype="RemoveAnnotation" memberid="Alice" position="4" length="0" />
+  </ops>
+  <after>
+   <office:text><text:p>AB<c:anchor c:memberId="Alice"/>C<c:cursor c:memberId="Alice"/>D</text:p><text:p>EFG<text:span>HIJ</text:span></text:p></office:text>
+  </after>
+ </test>
+ <test name="RemoveAnnotation_preservesMultipleExpandedCursors">
+  <before>
+   <office:text><text:p>ABC<office:annotation office:name="alice_2"><dc:creator e:memberid="Alice"/><dc:date>2013-08-05T12:34:07.061Z</dc:date><text:list><text:list-item><text:p>X</text:p></text:list-item></text:list></office:annotation>D</text:p><text:p>EFG<text:span>HIJ</text:span></text:p></office:text>
+  </before>
+  <ops>
+   <op optype="AddCursor" memberid="Alice" position="0" />
+   <op optype="AddCursor" memberid="Bob" position="0" />
+   <op optype="MoveCursor" memberid="Alice" position="4" length="1" />
+   <op optype="MoveCursor" memberid="Bob" position="5" length="-1" />
+   <op optype="RemoveAnnotation" memberid="Alice" position="4" length="1" />
+  </ops>
+  <after>
+   <office:text><text:p>ABC<c:cursor c:memberId="Alice"/><c:cursor c:memberId="Bob"/>D</text:p><text:p>EFG<text:span>HIJ</text:span></text:p></office:text>
+  </after>
+ </test>
+ <test name="RemoveAnnotation_preservesForeignElements" isFailing="true">
+  <before>
+   <office:text><text:p>ABC<office:annotation office:name="alice_2"><dc:creator e:memberid="Alice"/><dc:date>2013-08-05T12:34:07.061Z</dc:date><text:list><text:list-item><text:p><foreign:text/></text:p></text:list-item></text:list></office:annotation>D</text:p><text:p>EFG<text:span>HIJ</text:span></text:p></office:text>
+  </before>
+  <ops>
+   <op optype="RemoveAnnotation" memberid="Alice" position="4" length="0">
+   </op>
+  </ops>
+  <after>
+   <office:text><text:p>ABC<foreign:text/>D</text:p><text:p>EFG<text:span>HIJ</text:span></text:p></office:text>
   </after>
  </test>
  <test name="AddAnnotation_simple_multiCursors_1">
@@ -1317,6 +1431,19 @@
    <op optype="SplitParagraph" memberid="Bob" position="5" moveCursor="true"/>
   </ops>
   <after><office:text><text:p>ab<office:annotation office:name="alice_1"><dc:creator e:memberid="Alice">Alice</dc:creator><dc:date>2013-08-05T12:34:07.061Z</dc:date><text:list><text:list-item><text:p><c:cursor c:memberId="Alice"/></text:p></text:list-item></text:list></office:annotation>c</text:p><text:p><office:annotation-end office:name="alice_1"/><c:cursor c:memberId="Bob"/>d</text:p></office:text></after>
+ </test>
+ <test name="AddAnnotationInsertText_startPosSameAtStartOfParagraph" isFailing="true">
+  <!-- text inserted at the position of a start of an annotation at the start of a paragraph should be added to the annotated area -->
+  <before><office:text><text:p>abcd</text:p></office:text></before>
+  <ops>
+   <op optype="AddCursor" memberid="Alice"/>
+   <op optype="MoveCursor" memberid="Alice" position="0"/>
+   <op optype="AddCursor" memberid="Bob"/>
+   <op optype="MoveCursor" memberid="Bob" position="0"/>
+   <op optype="AddAnnotation" memberid="Alice" position="0" length="1" name="alice_1" timestamp="1375706047061"/>
+   <op optype="InsertText" memberid="Bob" position="0" text="123"/>
+  </ops>
+  <after><office:text><text:p><office:annotation office:name="alice_1"><dc:creator e:memberid="Alice"></dc:creator><dc:date>2013-08-05T12:34:07.061Z</dc:date><text:list><text:list-item><text:p><c:cursor c:memberId="Alice"/></text:p></text:list-item></text:list></office:annotation>123<c:cursor c:memberId="Bob"/>a<office:annotation-end office:name="alice_1"/>bcd</text:p></office:text></after>
  </test>
  <test name="AddAnnotationInsertText_startPosSameNotAtStartOfParagraph">
   <!-- text inserted at the position of the start of an annotation which is not at the start of a paragraph should be added before the annotated area -->
@@ -1466,5 +1593,99 @@
    <op optype="MoveCursor" memberid="Joe" position="0" length="2"/>
   </ops>
   <after><office:text><text:p><c:anchor c:memberId="Joe"/>AB<c:cursor c:memberId="Joe"/>C</text:p></office:text></after>
+ </test>
+ <test name="RemoveText_NearWhitespaceOverBoundary" isFailing="true">
+  <before><office:text><text:p><text:span>abc <text:s> </text:s></text:span><text:span>def</text:span></text:p></office:text></before>
+  <ops>
+   <op optype="AddCursor" memberid="Joe"/>
+   <op optype="MoveCursor" memberid="Joe" position="4" length="2"/>
+   <op optype="RemoveText" memberid="Joe" position="4" length="2"/>
+  </ops>
+  <after><office:text><text:p><text:span>abc <c:cursor c:memberId="Joe"/></text:span><text:span>ef</text:span></text:p></office:text></after>
+ </test>
+ <test name="RemoveText_NearWhitespaceOverBoundary_2">
+  <before><office:text><text:p><text:span>abc <text:s> </text:s></text:span><text:span>def</text:span></text:p></office:text></before>
+  <ops>
+   <op optype="AddCursor" memberid="Joe"/>
+   <op optype="MoveCursor" memberid="Joe" position="3" length="3"/>
+   <op optype="RemoveText" memberid="Joe" position="3" length="3"/>
+  </ops>
+  <after><office:text><text:p><text:span>abc<c:cursor c:memberId="Joe"/></text:span><text:span>ef</text:span></text:p></office:text></after>
+ </test>
+ <test name="RemoveText_NearWhitespaceOverBoundary_3" isFailing="true">
+  <before><office:text><text:p><text:span>abc </text:span><text:span>def</text:span></text:p></office:text></before>
+  <ops>
+   <op optype="AddCursor" memberid="Joe"/>
+   <op optype="MoveCursor" memberid="Joe" position="4" length="1"/>
+   <op optype="RemoveText" memberid="Joe" position="4" length="1"/>
+  </ops>
+  <after><office:text><text:p><text:span>abc <c:cursor c:memberId="Joe"/></text:span><text:span>ef</text:span></text:p></office:text></after>
+ </test>
+ <test name="RemoveText_NearWhitespaceOverBoundary_4">
+  <!-- This test has a problem with trailing whitespace not being correctly downgraded.
+       When the trailing spaces become correctly downgraded, this test can be removed and
+       the following will replace it -->
+  <before><office:text><text:p><text:span>abc</text:span><text:span>d <text:s> </text:s>ef</text:span></text:p></office:text></before>
+  <ops>
+   <op optype="AddCursor" memberid="Joe"/>
+   <op optype="MoveCursor" memberid="Joe" position="3" length="1"/>
+   <op optype="RemoveText" memberid="Joe" position="3" length="1"/>
+  </ops>
+  <after><office:text><text:p><text:span>abc<c:cursor c:memberId="Joe"/></text:span><text:span><text:s> </text:s><text:s> </text:s>ef</text:span></text:p></office:text></after>
+ </test>
+ <test name="RemoveText_NearWhitespaceOverBoundary_4_Ideal" isFailing="true">
+  <before><office:text><text:p><text:span>abc</text:span><text:span>d <text:s> </text:s>ef</text:span></text:p></office:text></before>
+  <ops>
+   <op optype="AddCursor" memberid="Joe"/>
+   <op optype="MoveCursor" memberid="Joe" position="3" length="1"/>
+   <op optype="RemoveText" memberid="Joe" position="3" length="1"/>
+  </ops>
+  <after><office:text><text:p><text:span>abc<c:cursor c:memberId="Joe"/></text:span><text:span> <text:s> </text:s>ef</text:span></text:p></office:text></after>
+ </test>
+ <test name="RemoveText_aroundInlineRootWithoutBreakingPositionsBehind_insertingLotsOfDots">
+  <!--- happened when simulating github issue #417 -->
+  <before>
+   <office:text><text:p/><text:p>ABCDEFGH</text:p><text:p>12345678</text:p></office:text>
+  </before>
+  <ops>
+   <op optype="AddAnnotation" memberid="Alice" position="3" length="2" name="a" timestamp="1375706047061"/>
+   <op optype="AddCursor" memberid="Joe"/>
+   <op optype="MoveCursor" memberid="Joe" position="17" length="0"/>
+   <op optype="MoveCursor" memberid="Joe" position="0" length="0"/>
+   <!-- Insert 500 chars at the begin for another step cache bookmark -->
+   <op optype="InsertText" memberid="Alice" position="0" text="...................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................."/>
+   <!-- remove one char before annotation start, one behind and +2 for positions due to being inline-root -->
+   <op optype="RemoveText" position="502" length="4"/>
+   <!-- Remove the 500 chars again, for simpler debugging-->
+   <op optype="RemoveText" position="0" length="500"/>
+   <op optype="MoveCursor" memberid="Joe" position="15" length="0"/>
+  </ops>
+  <after>
+   <office:text><text:p/><text:p>A<office:annotation office:name="a"><dc:creator e:memberid="Alice">Alice</dc:creator><dc:date>2013-08-05T12:34:07.061Z</dc:date><text:list><text:list-item><text:p></text:p></text:list-item></text:list></office:annotation>D<office:annotation-end office:name="a"/>EFGH</text:p><text:p>12345<c:cursor c:memberId="Joe"/>678</text:p></office:text>.
+  </after>
+ </test>
+ <test name="RemoveText_CopesWithEmptyTextNodes" hasSetup="true">
+  <before>
+   <office:text><text:p>ABC<text:span id="paddedByEmptyTextNodes">DEF</text:span>GH</text:p></office:text>
+  </before>
+  <ops>
+   <op optype="RemoveText" position="1" length="6"/>
+  </ops>
+  <after>
+   <office:text><text:p>AH</text:p></office:text>.
+  </after>
+ </test>
+ <test name="ApplyStyle_CopesWithSelectionSpanningDifferentSubtrees">
+  <before><office:text><text:p><text:span>AB</text:span>C<text:s> </text:s><text:s> </text:s>D<text:s> </text:s>E<text:s> </text:s></text:p></office:text></before>
+  <ops>
+   <op optype="AddCursor" memberid="Joe"/>
+   <op optype="MoveCursor" memberid="Joe" position="1" length="7"/>
+   <op optype="ApplyDirectStyling" memberid="Alice" position="1" length="7">
+    <setProperties><style:text-properties fo:font-weight="bold" /></setProperties>
+   </op>
+  </ops>
+  <after>
+    <office:text><text:p><text:span>A<c:anchor c:memberId="Joe"/></text:span><text:span text:style-name="auto63350368_0">B</text:span><text:span text:style-name="auto63350368_0">C<text:s> </text:s><text:s> </text:s>D<text:s> </text:s>E<c:cursor c:memberId="Joe"/></text:span><text:s> </text:s></text:p></office:text>
+  </after>
  </test>
 </tests>

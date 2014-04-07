@@ -36,38 +36,39 @@
 /*global runtime, Runtime, core, gui, xmldom, RuntimeTests, odf, ops, webodf_css: true*/
 
 runtime.loadClass("core.Base64Tests");
-runtime.loadClass("core.DomUtilsTests");
 runtime.loadClass("core.CursorTests");
+runtime.loadClass("core.DomUtilsTests");
 runtime.loadClass("core.PositionIteratorTests");
 runtime.loadClass("core.RuntimeTests");
+runtime.loadClass("core.StepIteratorTests");
 runtime.loadClass("core.UnitTester");
 runtime.loadClass("core.ZipTests");
-runtime.loadClass("gui.UndoStateRulesTests");
+runtime.loadClass("gui.SelectionControllerTests");
+runtime.loadClass("gui.StyleSummaryTests");
 runtime.loadClass("gui.TrivialUndoManagerTests");
-runtime.loadClass("gui.SelectionMoverTests");
-runtime.loadClass("gui.StyleHelperTests");
-runtime.loadClass("ops.OdtCursorTests");
-runtime.loadClass("ops.OdtDocumentTests");
-runtime.loadClass("ops.SessionTests");
-runtime.loadClass("ops.OperationTests");
-runtime.loadClass("ops.StepsTranslatorTests");
-runtime.loadClass("odf.OdfUtilsTests");
-runtime.loadClass("odf.ObjectNameGeneratorTests");
-runtime.loadClass("ops.TransformerTests");
-runtime.loadClass("ops.TransformationTests");
+runtime.loadClass("gui.UndoStateRulesTests");
 runtime.loadClass("odf.FormattingTests");
+runtime.loadClass("odf.LayoutTests");
+runtime.loadClass("odf.ObjectNameGeneratorTests");
 runtime.loadClass("odf.OdfContainerTests");
+runtime.loadClass("odf.OdfUtilsTests");
 runtime.loadClass("odf.StyleInfoTests");
 runtime.loadClass("odf.TextStyleApplicatorTests");
+runtime.loadClass("ops.OdtDocumentTests");
+runtime.loadClass("ops.OperationTests");
+runtime.loadClass("ops.SessionTests");
+runtime.loadClass("ops.StepsTranslatorTests");
+runtime.loadClass("ops.TransformationTests");
+runtime.loadClass("ops.TransformerTests");
 runtime.loadClass("xmldom.LSSerializerTests");
 runtime.loadClass("xmldom.XPathTests");
 
-// qtjsruntimetest tests break if OdfCanvas is allowed to insert a dynamic <link/> element.
-// If a dynamic link is inserted, subsequent dynamic style sheets (document.createElement(...)) fail to result in
-// new entries being added to document.styleSheets.
-// This can easily be seen by commenting out the following and running ops.OdtCursorTests followed by ops.OdtDocumentTests.
-// As ops.OdtDocumentTests is the only test suite to rely on style behaviour functioning correctly and will report failures.
-webodf_css = "/* Need to prevent OdfCanvas from inserting it's own <link/> element. See tests.js for more information */";
+
+// The StepsCache verification feature verifies the cache after every modification to ensure it does
+// not contain any bad data. This is quite slow to do in practice, but is very helpful for debugging,
+// and very important for tests.
+runtime.loadClass("ops.StepsCache");
+ops.StepsCache.ENABLE_CACHE_VERIFICATION = true;
 
 /**
  * Holds the unit tests to run.
@@ -85,17 +86,17 @@ if (runtime.getDOMImplementation() && runtime.parseXML("<a/>").createRange) {
 //     tests.push(core.CursorTests);
     tests.push(core.PositionIteratorTests);
     tests.push(core.DomUtilsTests);
+    tests.push(core.StepIteratorTests);
     tests.push(gui.UndoStateRulesTests);
     tests.push(gui.TrivialUndoManagerTests);
-    tests.push(gui.SelectionMoverTests);
-    tests.push(gui.StyleHelperTests);
+    tests.push(gui.SelectionControllerTests);
+    tests.push(gui.StyleSummaryTests);
     tests.push(odf.OdfUtilsTests);
     tests.push(odf.ObjectNameGeneratorTests);
     tests.push(odf.FormattingTests);
     tests.push(odf.OdfContainerTests);
     tests.push(odf.StyleInfoTests);
     tests.push(odf.TextStyleApplicatorTests);
-    tests.push(ops.OdtCursorTests);
     tests.push(ops.OdtDocumentTests);
     tests.push(ops.StepsTranslatorTests);
     tests.push(ops.TransformerTests);
@@ -104,6 +105,7 @@ if (runtime.getDOMImplementation() && runtime.parseXML("<a/>").createRange) {
 if (runtime.type() === "BrowserRuntime") {
     tests.push(xmldom.LSSerializerTests);
     tests.push(xmldom.XPathTests);
+    tests.push(odf.LayoutTests);
     tests.push(ops.SessionTests);
     tests.push(ops.OperationTests);
     tests.push(ops.TransformationTests);

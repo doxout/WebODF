@@ -47,6 +47,9 @@ ops.OpMoveCursor = function OpMoveCursor() {
 
     var memberid, timestamp, position, length, /**@type {!string}*/selectionType;
 
+    /**
+     * @param {!ops.OpMoveCursor.InitSpec} data
+     */
     this.init = function (data) {
         memberid = data.memberid;
         timestamp = data.timestamp;
@@ -56,9 +59,14 @@ ops.OpMoveCursor = function OpMoveCursor() {
     };
 
     this.isEdit = false;
+    this.group = undefined;
 
-    this.execute = function (odtDocument) {
-        var cursor = odtDocument.getCursor(memberid),
+    /**
+     * @param {!ops.Document} document
+     */
+    this.execute = function (document) {
+        var odtDocument = /**@type{ops.OdtDocument}*/(document),
+            cursor = odtDocument.getCursor(memberid),
             selectedRange;
 
         if (!cursor) {
@@ -68,10 +76,13 @@ ops.OpMoveCursor = function OpMoveCursor() {
         selectedRange = odtDocument.convertCursorToDomRange(position, length);
         cursor.setSelectedRange(selectedRange, length >= 0);
         cursor.setSelectionType(selectionType);
-        odtDocument.emit(ops.OdtDocument.signalCursorMoved, cursor);
+        odtDocument.emit(ops.Document.signalCursorMoved, cursor);
         return true;
     };
 
+    /**
+     * @return {!ops.OpMoveCursor.Spec}
+     */
     this.spec = function () {
         return {
             optype: "MoveCursor",
@@ -89,6 +100,14 @@ ops.OpMoveCursor = function OpMoveCursor() {
     timestamp:number,
     position:number,
     length:number,
-    selectionType:number
+    selectionType:string
 }}*/
 ops.OpMoveCursor.Spec;
+/**@typedef{{
+    memberid:string,
+    timestamp:(number|undefined),
+    position:number,
+    length:number,
+    selectionType:(string|undefined)
+}}*/
+ops.OpMoveCursor.InitSpec;

@@ -39,9 +39,12 @@ ops.OpUpdateMetadata = function OpUpdateMetadata() {
     "use strict";
 
     var memberid, timestamp,
-        /**@type{Object}*/setProperties,
-        /**@type{Object}*/removedProperties;
+        setProperties,
+        removedProperties;
 
+    /**
+     * @param {!ops.OpUpdateMetadata.InitSpec} data
+     */
     this.init = function (data) {
         memberid = data.memberid;
         timestamp = parseInt(data.timestamp, 10);
@@ -50,10 +53,16 @@ ops.OpUpdateMetadata = function OpUpdateMetadata() {
     };
 
     this.isEdit = true;
+    this.group = undefined;
 
-    this.execute = function (odtDocument) {
-        var odfContainer = odtDocument.getOdfCanvas().odfContainer(),
-            removedPropertiesArray = [],
+    /**
+     * @param {!ops.Document} document
+     */
+    this.execute = function (document) {
+        var odtDocument = /**@type{ops.OdtDocument}*/(document),
+            odfContainer = odtDocument.getOdfCanvas().odfContainer(),
+            removedPropertiesArray = [];
+/* dead code
             blockedProperties = ["dc:date", "dc:creator", "meta:editing-cycles"];
 
         if (setProperties) {
@@ -69,6 +78,8 @@ ops.OpUpdateMetadata = function OpUpdateMetadata() {
                     return false;
                 }
             });
+*/
+        if (removedProperties) {
             removedPropertiesArray = removedProperties.attributes.split(',');
         }
 
@@ -77,13 +88,31 @@ ops.OpUpdateMetadata = function OpUpdateMetadata() {
         return true;
     };
 
+    /**
+     * @return {!ops.OpUpdateMetadata.Spec}
+     */
     this.spec = function () {
         return {
             optype: "UpdateMetadata",
             memberid: memberid,
             timestamp: timestamp,
             setProperties: setProperties,
-            removedProperties: removedProperties 
+            removedProperties: removedProperties
         };
     };
 };
+/**@typedef{{
+    optype:string,
+    memberid:string,
+    timestamp:number,
+    setProperties:Object,
+    removedProperties:?{attributes:string}
+ }}*/
+ops.OpUpdateMetadata.Spec;
+/**@typedef{{
+    memberid:string,
+    timestamp:(number|undefined),
+    setProperties:Object,
+    removedProperties:?{attributes:string}
+ }}*/
+ops.OpUpdateMetadata.InitSpec;

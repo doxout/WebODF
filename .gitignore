@@ -30,3 +30,9 @@ node_modules/karma-phantomjs-launcher/
 node_modules/karma-requirejs/
 node_modules/karma-script-launcher/
 node_modules/karma/
+fontFaceDeclsTest.odt
+test.odt
+simple.odt
+simpleFrame.odt
+webodf/tests/label-alignment-list.odt
+webodf/tests/label-width-and-position-list.odt

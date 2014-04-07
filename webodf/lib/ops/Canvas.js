@@ -1,5 +1,6 @@
 /**
- * Copyright (C) 2012 KO GmbH <jos.van.den.oever@kogmbh.com>
+ * @license
+ * Copyright (C) 2012-2013 KO GmbH <copyright@kogmbh.com>
  *
  * @licstart
  * The JavaScript code in this page is free software: you can redistribute it
@@ -34,29 +35,27 @@
  * @source: http://www.webodf.org/
  * @source: https://github.com/kogmbh/WebODF/
  */
-/*global runtime: true, core: true*/
-runtime.loadClass("core.Base64");
 
-var args = arguments,
-    webodfjsFilename = args[1],
-    outputFilename = args[2];
+/*global ops */
+/*jslint emptyblock: true, unparam: true */
 
-runtime.readFile("content/web/viewer.html.in", "utf-8", function (err, vdata) {
-    if (err) {
-        runtime.log(err);
-        return;
-    }
-    runtime.readFile(webodfjsFilename, "utf-8", function (err, wdata) {
-        if (err) {
-            runtime.log(err);
-            return;
-        }
-        vdata = vdata.replace("@WEBODF_JS@", wdata);
-        runtime.writeFile(outputFilename, vdata, function (err) {
-            if (err) {
-                runtime.log(err);
-                return;
-            }
-        });
-    });
-});
+/**
+ * @interface
+ */
+ops.Canvas = function Canvas() { "use strict"; };
+/**
+ * @return {number}
+ */
+ops.Canvas.prototype.getZoomLevel = function () { "use strict"; };
+/**
+ * @return {!Element}
+ */
+ops.Canvas.prototype.getElement = function () { "use strict"; };
+/**
+ * @return {!HTMLElement}
+ */
+ops.Canvas.prototype.getSizer = function () { "use strict"; };
+/**
+ * @return {!gui.ZoomHelper}
+ */
+ops.Canvas.prototype.getZoomHelper = function () { "use strict"; };

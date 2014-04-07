@@ -43,16 +43,19 @@ define([
     "EnterEditMode",
     "MoveCursorToEndDirect",
     "InsertLetterA",
-    "Remove1Position",
-    "MoveCursor1StepLeft",
+    "RemovePositions",
+    "MoveCursorLeft",
     "SelectEntireDocument",
     "RemoveCurrentSelection",
     "PreloadDocument",
     "BoldCurrentSelection",
-    "MoveCursorToEnd"
+    "AlignCurrentSelectionJustified",
+    "MoveCursorToEnd",
+    "MoveCursorToStart"
 ], function (Benchmark, HTMLResultsRenderer,
-             OpenDocument, EnterEditMode, MoveCursorToEndDirect,InsertLetterA, Remove1Position, MoveCursor1StepLeft,
-             SelectEntireDocument, RemoveCurrentSelection, PreloadDocument, BoldCurrentSelection, MoveCursorToEnd) {
+             OpenDocument, EnterEditMode, MoveCursorToEndDirect,InsertLetterA, RemovePositions, MoveCursorLeft,
+             SelectEntireDocument, RemoveCurrentSelection, PreloadDocument, BoldCurrentSelection,
+             AlignCurrentSelectionJustified, MoveCursorToEnd, MoveCursorToStart) {
     "use strict";
 
     /**
@@ -77,7 +80,7 @@ define([
 
     /**
      * Extract supported benchmark options from the url query parameters
-     * @returns {!{fileUrl: !string, includeSlow: !boolean}}
+     * @return {!{fileUrl: !string, includeSlow: !boolean, colour: string|undefined}}
      */
     function getConfiguration() {
         var params = getQueryParams();
@@ -85,7 +88,9 @@ define([
             /** Test document to load. Relative or absolute urls are supported */
             fileUrl: params.fileUrl || "100pages.odt",
             /** Include known slow actions in the benchmark. These can take 10 or more minutes each on large docs */
-            includeSlow: params.includeSlow || false
+            includeSlow: params.includeSlow || false,
+            /** Background colour of the benchmark results. Useful for distinguishing different benchmark versions */
+            colour: params.colour
         };
     }
 
@@ -94,27 +99,37 @@ define([
      * @constructor
      */
     function HTMLBenchmark() {
-        var loadingScreen = document.getElementById('loadingScreen'),
+        var loadingScreenElement = document.getElementById('loadingScreen'),
+            canvasElement = document.getElementById("canvas"),
+            benchmarkResultsElement = document.getElementById("benchmarkResults").getElementsByTagName("tbody")[0],
+            versionElement = document.getElementById("version"),
             config = getConfiguration(),
-            benchmark = new Benchmark();
+            benchmark = new Benchmark(canvasElement),
+            renderer = new HTMLResultsRenderer(benchmark, benchmarkResultsElement);
 
-        new HTMLResultsRenderer(benchmark);
+        versionElement.textContent = benchmark.getWebODFVersion();
+        renderer.setBackgroundColour(config.colour);
 
-        loadingScreen.style.display = "none";
+        loadingScreenElement.style.display = "none";
 
         benchmark.actions.push(new PreloadDocument(config.fileUrl));
         benchmark.actions.push(new OpenDocument(config.fileUrl));
         benchmark.actions.push(new EnterEditMode());
         benchmark.actions.push(new MoveCursorToEnd());
+        benchmark.actions.push(new MoveCursorToStart());
+        benchmark.actions.push(new InsertLetterA(100));
+        benchmark.actions.push(new RemovePositions(100, true));
         benchmark.actions.push(new MoveCursorToEndDirect());
-        benchmark.actions.push(new InsertLetterA());
-        benchmark.actions.push(new Remove1Position(true));
-        benchmark.actions.push(new MoveCursor1StepLeft());
-        benchmark.actions.push(new Remove1Position(false));
+        benchmark.actions.push(new InsertLetterA(1));
+        benchmark.actions.push(new InsertLetterA(100));
+        benchmark.actions.push(new RemovePositions(1, true));
+        benchmark.actions.push(new MoveCursorLeft(1));
+        benchmark.actions.push(new MoveCursorLeft(100));
+        benchmark.actions.push(new RemovePositions(1, false));
+        benchmark.actions.push(new RemovePositions(100, true));
         benchmark.actions.push(new SelectEntireDocument());
-        if (config.includeSlow) {
-            benchmark.actions.push(new BoldCurrentSelection());
-        }
+        benchmark.actions.push(new BoldCurrentSelection());
+        benchmark.actions.push(new AlignCurrentSelectionJustified());
         benchmark.actions.push(new RemoveCurrentSelection());
 
         this.start = benchmark.start;

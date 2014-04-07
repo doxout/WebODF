@@ -42,99 +42,86 @@
  * create specific operation instances.
  */
 
-runtime.loadClass("ops.OpAddMember");
-runtime.loadClass("ops.OpUpdateMember");
-runtime.loadClass("ops.OpRemoveMember");
-runtime.loadClass("ops.OpAddCursor");
-runtime.loadClass("ops.OpApplyDirectStyling");
-runtime.loadClass("ops.OpRemoveCursor");
-runtime.loadClass("ops.OpMoveCursor");
-runtime.loadClass("ops.OpSetBlob");
-runtime.loadClass("ops.OpRemoveBlob");
-runtime.loadClass("ops.OpInsertImage");
-runtime.loadClass("ops.OpInsertTable");
-runtime.loadClass("ops.OpInsertText");
-runtime.loadClass("ops.OpRemoveText");
-runtime.loadClass("ops.OpSplitParagraph");
-runtime.loadClass("ops.OpSetParagraphStyle");
-runtime.loadClass("ops.OpUpdateParagraphStyle");
-runtime.loadClass("ops.OpAddStyle");
-runtime.loadClass("ops.OpRemoveStyle");
-runtime.loadClass("ops.OpAddAnnotation");
-runtime.loadClass("ops.OpRemoveAnnotation");
-runtime.loadClass("ops.OpUpdateMetadata");
-runtime.loadClass("ops.OpApplyHyperlink");
-runtime.loadClass("ops.OpRemoveHyperlink");
 
 /**
  * @constructor
  */
 ops.OperationFactory = function OperationFactory() {
     "use strict";
-    var specs;
+    var /**@type{!Object.<!string, !ops.OperationFactory.SpecConstructor>}*/
+        specs;
+
+    /**
+     * @param {!function(new:ops.Operation)} Constructor
+     * @return {!ops.OperationFactory.SpecConstructor}
+     */
+    /*jslint unparam:true*/
+    function construct(Constructor) {
+        return function(spec) {
+            return new Constructor();
+        };
+    }
+    /*jslint unparam:false*/
 
     /**
      * Registers an operation constructor with this operation factory
      * @param {!string} specName
-     * @param {!function(Object) : !ops.Operation} specConstructor
+     * @param {!ops.OperationFactory.SpecConstructor} specConstructor
+     * @return {undefined}
      */
-    this.register = function(specName, specConstructor) {
+    this.register = function (specName, specConstructor) {
         specs[specName] = specConstructor;
     };
 
     /**
      * Create an instance of an operation based on the provided spec
-     * @param {Object} spec
-     * @returns {ops.Operation|null}
+     * @param {!{optype:string}} spec
+     * @return {ops.Operation}
      */
     this.create = function (spec) {
-        var op = null,
-            specConstructor = specs[spec.optype];
-        if (specConstructor) {
-            op = specConstructor(spec);
+        var /**@type{ops.Operation}*/
+            op = null,
+            constructor = specs[spec.optype];
+        if (constructor) {
+            op = constructor(spec);
             op.init(spec);
         }
         return op;
     };
 
-    /**
-     * Returns a constructor function for the provided type
-     * @param OperationType Operation type
-     * @returns {Function}
-     */
-    function constructor(OperationType) {
-        return function() {
-            return new OperationType();
-        };
-    }
-
     function init() {
         specs = {
-            AddMember: constructor(ops.OpAddMember),
-            UpdateMember: constructor(ops.OpUpdateMember),
-            RemoveMember: constructor(ops.OpRemoveMember),
-            AddCursor : constructor(ops.OpAddCursor),
-            ApplyDirectStyling : constructor(ops.OpApplyDirectStyling),
-            SetBlob : constructor(ops.OpSetBlob),
-            RemoveBlob : constructor(ops.OpRemoveBlob),
-            InsertImage : constructor(ops.OpInsertImage),
-            InsertTable : constructor(ops.OpInsertTable),
-            InsertText : constructor(ops.OpInsertText),
-            RemoveText : constructor(ops.OpRemoveText),
-            SplitParagraph : constructor(ops.OpSplitParagraph),
-            SetParagraphStyle : constructor(ops.OpSetParagraphStyle),
-            UpdateParagraphStyle : constructor(ops.OpUpdateParagraphStyle),
-            AddStyle : constructor(ops.OpAddStyle),
-            RemoveStyle : constructor(ops.OpRemoveStyle),
-            MoveCursor : constructor(ops.OpMoveCursor),
-            RemoveCursor : constructor(ops.OpRemoveCursor),
-            AddAnnotation : constructor(ops.OpAddAnnotation),
-            RemoveAnnotation : constructor(ops.OpRemoveAnnotation),
-            UpdateMetadata: constructor(ops.OpUpdateMetadata),
-            ApplyHyperlink: constructor(ops.OpApplyHyperlink),
-            RemoveHyperlink: constructor(ops.OpRemoveHyperlink)
+            AddMember: construct(ops.OpAddMember),
+            UpdateMember: construct(ops.OpUpdateMember),
+            RemoveMember: construct(ops.OpRemoveMember),
+            AddCursor: construct(ops.OpAddCursor),
+            ApplyDirectStyling: construct(ops.OpApplyDirectStyling),
+            SetBlob: construct(ops.OpSetBlob),
+            RemoveBlob: construct(ops.OpRemoveBlob),
+            InsertImage: construct(ops.OpInsertImage),
+            InsertTable: construct(ops.OpInsertTable),
+            InsertText: construct(ops.OpInsertText),
+            RemoveText: construct(ops.OpRemoveText),
+            SplitParagraph: construct(ops.OpSplitParagraph),
+            SetParagraphStyle: construct(ops.OpSetParagraphStyle),
+            UpdateParagraphStyle: construct(ops.OpUpdateParagraphStyle),
+            AddStyle: construct(ops.OpAddStyle),
+            RemoveStyle: construct(ops.OpRemoveStyle),
+            MoveCursor: construct(ops.OpMoveCursor),
+            RemoveCursor: construct(ops.OpRemoveCursor),
+            AddAnnotation: construct(ops.OpAddAnnotation),
+            RemoveAnnotation: construct(ops.OpRemoveAnnotation),
+            UpdateMetadata: construct(ops.OpUpdateMetadata),
+            ApplyHyperlink: construct(ops.OpApplyHyperlink),
+            RemoveHyperlink: construct(ops.OpRemoveHyperlink)
         };
     }
 
     init();
 };
+
+
+/**
+ * @typedef {!function(!{optype:!string}):!ops.Operation}
+ */
+ops.OperationFactory.SpecConstructor;

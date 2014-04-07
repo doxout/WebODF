@@ -38,44 +38,42 @@
 
 /*global Node, runtime, core, gui, ops, odf*/
 
-runtime.loadClass("core.EventNotifier");
-runtime.loadClass("core.DomUtils");
-runtime.loadClass("odf.OdfUtils");
-runtime.loadClass("odf.Namespaces");
-runtime.loadClass("gui.SelectionMover");
-runtime.loadClass("core.PositionFilterChain");
-runtime.loadClass("ops.StepsTranslator");
-runtime.loadClass("ops.TextPositionFilter");
-runtime.loadClass("ops.Member");
 
 /**
  * A document that keeps all data related to the mapped document.
  * @constructor
+ * @implements {ops.Document}
+ * @implements {core.Destroyable}
  * @param {!odf.OdfCanvas} odfCanvas
  */
 ops.OdtDocument = function OdtDocument(odfCanvas) {
     "use strict";
 
     var self = this,
+        /**@type{!odf.OdfUtils}*/
         odfUtils,
+        /**@type{!core.DomUtils}*/
         domUtils,
         /**!Object.<!ops.OdtCursor>*/
         cursors = {},
         /**!Object.<!ops.Member>*/
         members = {},
         eventNotifier = new core.EventNotifier([
-            ops.OdtDocument.signalMemberAdded,
-            ops.OdtDocument.signalMemberUpdated,
-            ops.OdtDocument.signalMemberRemoved,
-            ops.OdtDocument.signalCursorAdded,
-            ops.OdtDocument.signalCursorRemoved,
-            ops.OdtDocument.signalCursorMoved,
+            ops.Document.signalMemberAdded,
+            ops.Document.signalMemberUpdated,
+            ops.Document.signalMemberRemoved,
+            ops.Document.signalCursorAdded,
+            ops.Document.signalCursorRemoved,
+            ops.Document.signalCursorMoved,
             ops.OdtDocument.signalParagraphChanged,
             ops.OdtDocument.signalParagraphStyleModified,
             ops.OdtDocument.signalCommonStyleCreated,
             ops.OdtDocument.signalCommonStyleDeleted,
             ops.OdtDocument.signalTableAdded,
-            ops.OdtDocument.signalOperationExecuted,
+            ops.OdtDocument.signalOperationStart,
+            ops.OdtDocument.signalOperationEnd,
+            ops.OdtDocument.signalProcessingBatchStart,
+            ops.OdtDocument.signalProcessingBatchEnd,
             ops.OdtDocument.signalUndoStackChanged,
             ops.OdtDocument.signalStepsInserted,
             ops.OdtDocument.signalStepsRemoved
@@ -85,11 +83,13 @@ ops.OdtDocument = function OdtDocument(odfCanvas) {
         /**@const*/
         FILTER_REJECT = core.PositionFilter.FilterResult.FILTER_REJECT,
         filter,
+        /**@type{!ops.StepsTranslator}*/
         stepsTranslator,
         lastEditingOp,
         unsupportedMetadataRemoved = false;
 
     /**
+     * Return the office:text element of this document.
      * @return {!Element}
      */
     function getRootNode() {
@@ -98,14 +98,52 @@ ops.OdtDocument = function OdtDocument(odfCanvas) {
         runtime.assert(localName === "text", "Unsupported content element type '" + localName + "' for OdtDocument");
         return element;
     }
+    /**
+     * Return the office:document element of this document.
+     * @return {!Element}
+     */
+    this.getDocumentElement = function () {
+        return odfCanvas.odfContainer().rootElement;
+    };
+    /**
+     * @return {!Document}
+     */
+    this.getDOMDocument = function () {
+        return /**@type{!Document}*/(this.getDocumentElement().ownerDocument);
+    };
+
+    this.cloneDocumentElement = function () {
+        var rootElement = self.getDocumentElement(),
+            annotationViewManager = odfCanvas.getAnnotationViewManager(),
+            initialDoc;
+
+        if (annotationViewManager) {
+            annotationViewManager.forgetAnnotations();
+        }
+        initialDoc = rootElement.cloneNode(true);
+        odfCanvas.refreshAnnotations();
+        return initialDoc;
+    };
+
+    /**
+     * @param {!Element} documentElement
+     */
+    this.setDocumentElement = function (documentElement) {
+        var odfContainer = odfCanvas.odfContainer();
+        // TODO Replace with a neater hack for reloading the Odt tree
+        // Once this is fixed, SelectionView.addOverlays & StepsTranslator.verifyRootNode can be largely removed
+        odfContainer.setRootElement(documentElement);
+        odfCanvas.setOdfContainer(odfContainer, true);
+        odfCanvas.refreshCSS();
+    };
 
     /**
      * @return {!Document}
      */
-    function getDOM() {
-        return /**@type{!Document}*/(getRootNode().ownerDocument);
+    function getDOMDocument() {
+        return /**@type{!Document}*/(self.getDocumentElement().ownerDocument);
     }
-    this.getDOM = getDOM;
+    this.getDOMDocument = getDOMDocument;
     
     /**
      * @param {!Node} node
@@ -165,6 +203,37 @@ ops.OdtDocument = function OdtDocument(odfCanvas) {
     }
 
     /**
+     * Create a new StepIterator instance set to the defined position
+     *
+     * @param {!Node} container
+     * @param {!number} offset
+     * @param {!Array.<!core.PositionFilter>} filters Filter to apply to the iterator positions. If multiple
+     *  iterators are provided, they will be combined in order using a PositionFilterChain.
+     * @param {!Node} subTree Subtree to search for step within. Generally a paragraph or document root. Choosing
+     *  a smaller subtree allows iteration to end quickly if there are no walkable steps remaining in a particular
+     *  direction. This can vastly improve performance.
+     *
+     * @return {!core.StepIterator}
+     */
+    function createStepIterator(container, offset, filters, subTree) {
+        var positionIterator = gui.SelectionMover.createPositionIterator(subTree),
+            filterOrChain,
+            stepIterator;
+
+        if (filters.length === 1) {
+            filterOrChain = filters[0];
+        } else {
+            filterOrChain = new core.PositionFilterChain();
+            filters.forEach(filterOrChain.addFilter);
+        }
+
+        stepIterator = new core.StepIterator(filterOrChain, positionIterator);
+        stepIterator.setPosition(container, offset);
+        return stepIterator;
+    }
+    this.createStepIterator = createStepIterator;
+
+    /**
      * Returns a PositionIterator instance at the
      * specified starting position
      * @param {!number} position
@@ -185,7 +254,7 @@ ops.OdtDocument = function OdtDocument(odfCanvas) {
      * @param {function(!number, !Node, !number):!boolean=} roundDirection if the node & offset
      * is not in an accepted location, this delegate is used to choose between rounding up or
      * rounding down to the nearest step. If not provided, the default behaviour is to round down.
-     * @returns {!number}
+     * @return {!number}
      */
     this.convertDomPointToCursorStep = function (node, offset, roundDirection) {
         return stepsTranslator.convertDomPointToSteps(node, offset, roundDirection);
@@ -194,7 +263,7 @@ ops.OdtDocument = function OdtDocument(odfCanvas) {
     /**
      * @param {!{anchorNode: !Node, anchorOffset: !number, focusNode: !Node, focusOffset: !number}} selection
      * @param {function(!Node, !number):function(!number, !Node, !number):!boolean=} constraint
-     * @returns {{position: !number, length: number}}
+     * @return {!{position: !number, length: number}}
      */
     this.convertDomToCursorRange = function (selection, constraint) {
         var point1,
@@ -222,10 +291,10 @@ ops.OdtDocument = function OdtDocument(odfCanvas) {
      * Convert a cursor range to a DOM range
      * @param {!number} position
      * @param {!number} length
-     * @returns {Range}
+     * @return {!Range}
      */
     this.convertCursorToDomRange = function (position, length) {
-        var range = getDOM().createRange(),
+        var range = getDOMDocument().createRange(),
             point1,
             point2;
 
@@ -261,7 +330,8 @@ ops.OdtDocument = function OdtDocument(odfCanvas) {
             node = iterator.container(),
             lastTextNode,
             nodeOffset = 0,
-            cursorNode = null;
+            cursorNode = null,
+            text;
 
         if (node.nodeType === Node.TEXT_NODE) {
             // Iterator has stopped within an existing text node, to put that up as a possible target node
@@ -276,13 +346,13 @@ ops.OdtDocument = function OdtDocument(odfCanvas) {
                     // In this case, after the split, the right of the requested step is just after the new node
                     lastTextNode = lastTextNode.splitText(nodeOffset);
                 }
-                lastTextNode.parentNode.insertBefore(getDOM().createTextNode(""), lastTextNode);
+                lastTextNode.parentNode.insertBefore(getDOMDocument().createTextNode(""), lastTextNode);
                 lastTextNode = /**@type{!Text}*/(lastTextNode.previousSibling);
                 nodeOffset = 0;
             }
         } else {
             // There is no text node at the current position, so insert a new one at the current position
-            lastTextNode = getDOM().createTextNode("");
+            lastTextNode = getDOMDocument().createTextNode("");
             nodeOffset = 0;
             node.insertBefore(lastTextNode, iterator.rightNode());
         }
@@ -304,7 +374,7 @@ ops.OdtDocument = function OdtDocument(odfCanvas) {
                     // The last text node contains content but is not adjacent to the cursor
                     // This can't be moved, as moving it would move the text content around as well. Yikes!
                     // So, create a new text node to insert data into
-                    lastTextNode = getDOM().createTextNode('');
+                    lastTextNode = getDOMDocument().createTextNode('');
                     nodeOffset = 0;
                 }
                 // Keep the destination text node right next to the member's cursor, so inserted text pushes the cursor over
@@ -325,16 +395,18 @@ ops.OdtDocument = function OdtDocument(odfCanvas) {
         // After the above cursor adjustments, if the lastTextNode
         // has a text node previousSibling, merge them and make the result the lastTextNode
         while (lastTextNode.previousSibling && lastTextNode.previousSibling.nodeType === Node.TEXT_NODE) {
-            lastTextNode.previousSibling.appendData(lastTextNode.data);
-            nodeOffset = /**@type{!number}*/(lastTextNode.previousSibling.length);
-            lastTextNode = /**@type{!Text}*/(lastTextNode.previousSibling);
+            text = /**@type{!Text}*/(lastTextNode.previousSibling);
+            text.appendData(lastTextNode.data);
+            nodeOffset = text.length;
+            lastTextNode = text;
             lastTextNode.parentNode.removeChild(lastTextNode.nextSibling);
         }
 
         // Empty text nodes can be left on either side of the split operations that have occurred
         while (lastTextNode.nextSibling && lastTextNode.nextSibling.nodeType === Node.TEXT_NODE) {
-            lastTextNode.appendData(lastTextNode.nextSibling.data);
-            lastTextNode.parentNode.removeChild(lastTextNode.nextSibling);
+            text = /**@type{!Text}*/(lastTextNode.nextSibling);
+            lastTextNode.appendData(text.data);
+            lastTextNode.parentNode.removeChild(text);
         }
 
         return {textNode: lastTextNode, offset: nodeOffset };
@@ -342,7 +414,7 @@ ops.OdtDocument = function OdtDocument(odfCanvas) {
 
     /**
      * @param {?Node} node
-     * @return {?Node}
+     * @return {?Element}
      */
     function getParagraphElement(node) {
         return odfUtils.getParagraphElement(node);
@@ -351,7 +423,7 @@ ops.OdtDocument = function OdtDocument(odfCanvas) {
     /**
      * @param {!string} styleName
      * @param {!string} styleFamily
-     * @returns {Element}
+     * @return {Element}
      */
     function getStyleElement(styleName, styleFamily) {
         return odfCanvas.getFormatting().getStyleElement(styleName, styleFamily);
@@ -373,7 +445,7 @@ ops.OdtDocument = function OdtDocument(odfCanvas) {
     function getParagraphStyleAttributes(styleName) {
         var node = getParagraphStyleElement(styleName);
         if (node) {
-            return odfCanvas.getFormatting().getInheritedStyleAttributes(node);
+            return odfCanvas.getFormatting().getInheritedStyleAttributes(node, false);
         }
 
         return null;
@@ -434,19 +506,35 @@ ops.OdtDocument = function OdtDocument(odfCanvas) {
     function upgradeWhitespaceToElement(textNode, offset) {
         runtime.assert(textNode.data[offset] === ' ', "upgradeWhitespaceToElement: textNode.data[offset] should be a literal space");
 
-        var space = textNode.ownerDocument.createElementNS(odf.Namespaces.textns, 'text:s');
+        var space = textNode.ownerDocument.createElementNS(odf.Namespaces.textns, 'text:s'),
+            container = textNode.parentNode,
+            adjacentNode = textNode;
+
         space.appendChild(textNode.ownerDocument.createTextNode(' '));
 
-        textNode.deleteData(offset, 1);
-        if (offset > 0) { // Don't create an empty text node if the offset is 0...
-            textNode = /**@type {!Text}*/(textNode.splitText(offset));
+        if (textNode.length === 1) {
+            // The space is the only element in this node. Can simply replace it
+            container.replaceChild(space, textNode);
+        } else {
+            textNode.deleteData(offset, 1);
+            if (offset > 0) { // Don't create an empty text node if the offset is 0...
+                if (offset < textNode.length) {
+                    // Don't split if offset === textNode.length as this would add an empty text node after
+                    textNode.splitText(offset);
+                }
+                adjacentNode = textNode.nextSibling;
+            }
+            container.insertBefore(space, adjacentNode);
         }
-        textNode.parentNode.insertBefore(space, textNode);
         return space;
     }
 
+    /**
+     * @param {!number} position
+     */
     function upgradeWhitespacesAtPosition(position) {
         var iterator = getIteratorAtPosition(position),
+            /**@type{!Node}*/
             container,
             offset,
             i;
@@ -460,7 +548,7 @@ ops.OdtDocument = function OdtDocument(odfCanvas) {
             offset = iterator.unfilteredDomOffset();
             if (container.nodeType === Node.TEXT_NODE
                     && container.data[offset] === ' '
-                    && odfUtils.isSignificantWhitespace(container, offset)) {
+                    && odfUtils.isSignificantWhitespace(/**@type{!Text}*/(container), offset)) {
                 container = upgradeWhitespaceToElement(/**@type{!Text}*/(container), offset);
                 // Reset the iterator position to be after the newly created space character
                 iterator.moveToEndOfNode(container);
@@ -482,6 +570,7 @@ ops.OdtDocument = function OdtDocument(odfCanvas) {
      */
     this.downgradeWhitespacesAtPosition = function (position) {
         var iterator = getIteratorAtPosition(position),
+            /**@type{!Node}*/
             container,
             offset,
             firstSpaceElementChild,
@@ -489,18 +578,18 @@ ops.OdtDocument = function OdtDocument(odfCanvas) {
 
         container = iterator.container();
         offset = iterator.unfilteredDomOffset();
-        while (!odfUtils.isSpaceElement(container) && container.childNodes[offset]) {
+        while (!odfUtils.isSpaceElement(container) && container.childNodes.item(offset)) {
             // iterator.container will likely return a paragraph element with a non-zero offset
             // easiest way to translate this is to keep diving into child nodes until the either
             // an odf character element is encountered, or there are no more children
-            container = container.childNodes[offset];
+            container = /**@type{!Node}*/(container.childNodes.item(offset));
             offset = 0;
         }
         if (container.nodeType === Node.TEXT_NODE) {
             // a space element cannot be a text node. Perhaps it's parent is
             // this would be hit if iterator.container returns a text node or the previous loop dives
             // all the way down without finding any odf character elements
-            container = container.parentNode;
+            container = /**@type{!Node}*/(container.parentNode);
         }
         if (odfUtils.isDowngradableSpaceElement(container)) {
             firstSpaceElementChild = container.firstChild;
@@ -539,91 +628,78 @@ ops.OdtDocument = function OdtDocument(odfCanvas) {
     this.getTextNodeAtStep = getTextNodeAtStep;
 
     /**
+     * Returns the closest parent paragraph or root to the supplied container and offset
+     * @param {!Node} container
+     * @param {!number} offset
+     * @param {!Node} root
+     *
+     * @return {!Node}
+     */
+    function paragraphOrRoot(container, offset, root) {
+        var node = container.childNodes.item(offset) || container,
+            paragraph = getParagraphElement(node);
+        if (paragraph && domUtils.containsNode(root, paragraph)) {
+            // Only return the paragraph if it is contained within the destination root
+            return /**@type{!Node}*/(paragraph);
+        }
+        // Otherwise the step filter should be contained within the supplied root
+        return root;
+    }
+
+    /**
      * Iterates through all cursors and checks if they are in
      * walkable positions; if not, move the cursor 1 filtered step backward
      * which guarantees walkable state for all cursors,
      * while keeping them inside the same root. An event will be raised for this cursor if it is moved
      */
     this.fixCursorPositions = function () {
-        var rootConstrainedFilter = new core.PositionFilterChain();
-        rootConstrainedFilter.addFilter('BaseFilter', filter);
-
-        Object.keys(cursors).forEach(function(memberId) {
+        Object.keys(cursors).forEach(function (memberId) {
             var cursor = cursors[memberId],
-                stepCounter = cursor.getStepCounter(),
-                stepsSelectionLength,
-                positionsToAdjustFocus,
-                positionsToAdjustAnchor,
-                positionsToAnchor,
+                root = getRoot(cursor.getNode()),
+                rootFilter = self.createRootFilter(root),
+                subTree,
+                startPoint,
+                endPoint,
+                selectedRange,
                 cursorMoved = false;
 
-            // Equip a Root Filter for specifically this cursor
-            rootConstrainedFilter.addFilter('RootFilter', self.createRootFilter(memberId));
-            stepsSelectionLength = stepCounter.countStepsToPosition(cursor.getAnchorNode(), 0, rootConstrainedFilter);
+            selectedRange = cursor.getSelectedRange();
+            subTree = paragraphOrRoot(/**@type{!Node}*/(selectedRange.startContainer), selectedRange.startOffset, root);
+            startPoint = createStepIterator(/**@type{!Node}*/(selectedRange.startContainer), selectedRange.startOffset,
+                [filter, rootFilter], subTree);
 
-            if (!stepCounter.isPositionWalkable(rootConstrainedFilter)) {
+            if (!selectedRange.collapsed) {
+                subTree = paragraphOrRoot(/**@type{!Node}*/(selectedRange.endContainer), selectedRange.endOffset, root);
+                endPoint = createStepIterator(/**@type{!Node}*/(selectedRange.endContainer), selectedRange.endOffset,
+                    [filter, rootFilter], subTree);
+            } else {
+                endPoint = startPoint;
+            }
+
+            if (!startPoint.isStep() || !endPoint.isStep()) {
                 cursorMoved = true;
-                // Record how far off each end of the selection is from an accepted position
-                positionsToAdjustFocus = stepCounter.countPositionsToNearestStep(cursor.getNode(), 0, rootConstrainedFilter);
-                positionsToAdjustAnchor = stepCounter.countPositionsToNearestStep(cursor.getAnchorNode(), 0, rootConstrainedFilter);
-                cursor.move(positionsToAdjustFocus); // Need to move into a valid position before extending the selection
-
-                if (stepsSelectionLength !== 0) {
-                    // Normally the step is rounded down, meaning the position adjustment will be negative
-                    // The only circumstance in which the position adjust is positive is when either the node appears
-                    // before the first valid position in a document, or, the rounded down position would move the node
-                    // to a previous paragraph (something that is never desired)
-                    // In this case, the selection is lengthened or shortened when the anchor and focus are adjusted
-                    if (positionsToAdjustAnchor > 0) {
-                        stepsSelectionLength += 1;
-                    }
-                    if (positionsToAdjustFocus > 0) {
-                        stepsSelectionLength -= 1;
-                    }
-                    positionsToAnchor = stepCounter.countSteps(stepsSelectionLength, rootConstrainedFilter);
-                    // Cursor extension implicitly goes anchor-to-focus. As such, the cursor needs to be navigated
-                    // first to the anchor position, then extended to the focus node to ensure the focus ends up at the
-                    // correct end of the selection
-                    cursor.move(positionsToAnchor);
-                    cursor.move(-positionsToAnchor, true);
+                runtime.assert(startPoint.roundToClosestStep(), "No walkable step found for cursor owned by " + memberId);
+                selectedRange.setStart(startPoint.container(), startPoint.offset());
+                runtime.assert(endPoint.roundToClosestStep(), "No walkable step found for cursor owned by " + memberId);
+                selectedRange.setEnd(endPoint.container(), endPoint.offset());
+            } else if (startPoint.container() === endPoint.container() && startPoint.offset() === endPoint.offset()) {
+                // The range *should* be collapsed
+                if (!selectedRange.collapsed || cursor.getAnchorNode() !== cursor.getNode()) {
+                    // It might not be collapsed if there are other unwalkable nodes (e.g., cursors)
+                    // between the cursor and anchor nodes. In this case, force the cursor to collapse
+                    cursorMoved = true;
+                    selectedRange.setStart(startPoint.container(), startPoint.offset());
+                    selectedRange.collapse(true);
                 }
-            } else if (stepsSelectionLength === 0) {
-                cursorMoved = true;
-                // call move(0) here to force the cursor to reset its selection to collapsed
-                // and remove the now-unnecessary anchor node
-                cursor.move(0);
             }
 
             if (cursorMoved) {
-                self.emit(ops.OdtDocument.signalCursorMoved, cursor);
+                cursor.setSelectedRange(selectedRange, cursor.hasForwardSelection());
+                self.emit(ops.Document.signalCursorMoved, cursor);
             }
-            // Un-equip the Root Filter for this cursor because we are done with it
-            rootConstrainedFilter.removeFilter('RootFilter');
         });
     };
 
-    /**
-     * This function calculates the steps in ODF world between the cursor of the
-     * given member and the given position in the DOM. If the given position is
-     * not walkable, then it will be the number of steps to the last walkable position
-     * before the given position from the direction of the cursor.
-     * @param {!string} memberid
-     * @param {!Node} node
-     * @param {!number} offset offset in filtered DOM world
-     * @return {!number}
-     */
-    this.getDistanceFromCursor = function (memberid, node, offset) {
-        var cursor = cursors[memberid],
-            focusPosition,
-            targetPosition;
-        runtime.assert((node !== null) && (node !== undefined),
-            "OdtDocument.getDistanceFromCursor called without node");
-        if (cursor) {
-            focusPosition = stepsTranslator.convertDomPointToSteps(cursor.getNode(), 0);
-            targetPosition = stepsTranslator.convertDomPointToSteps(node, offset);
-        }
-        return targetPosition - focusPosition;
-    };
     /**
      * This function returns the position in ODF world of the cursor of the member.
      * @param {!string} memberid
@@ -642,9 +718,9 @@ ops.OdtDocument = function OdtDocument(odfCanvas) {
      * !IMPORTANT! length is a vector, and may be negative if the cursor selection
      * is reversed (i.e., user clicked and dragged the cursor backwards)
      * @param {!string} memberid
-     * @returns {{position: !number, length: !number}}
+     * @return {{position: !number, length: !number}}
      */
-    this.getCursorSelection = function(memberid) {
+    this.getCursorSelection = function (memberid) {
         var cursor = cursors[memberid],
             focusPosition = 0,
             anchorPosition = 0;
@@ -668,6 +744,13 @@ ops.OdtDocument = function OdtDocument(odfCanvas) {
      * @return {!odf.OdfCanvas}
      */
     this.getOdfCanvas = function () {
+        return odfCanvas;
+    };
+
+    /**
+     * @return {!ops.Canvas}
+     */
+    this.getCanvas = function () {
         return odfCanvas;
     };
 
@@ -710,30 +793,34 @@ ops.OdtDocument = function OdtDocument(odfCanvas) {
     };
 
     /**
-     * @return {!Array.<!ops.OdtCursor>}
+     * @return {!Array.<string>}
      */
-    this.getCursors = function () {
-        var list = [], i;
+    this.getMemberIds = function () {
+        var list = [],
+            /**@type{string}*/
+            i;
         for (i in cursors) {
             if (cursors.hasOwnProperty(i)) {
-                list.push(cursors[i]);
+                list.push(cursors[i].getMemberId());
             }
         }
         return list;
     };
 
     /**
+     * Adds the specified cursor to the ODT document. The cursor will be collapsed
+     * to the first available cursor position in the document.
      * @param {!ops.OdtCursor} cursor
      * @return {undefined}
      */
     this.addCursor = function (cursor) {
         runtime.assert(Boolean(cursor), "OdtDocument::addCursor without cursor");
-        var distanceToFirstTextNode = cursor.getStepCounter().countSteps(1, filter),
-            memberid = cursor.getMemberId();
+        var memberid = cursor.getMemberId(),
+            initialSelection = self.convertCursorToDomRange(0, 0);
 
         runtime.assert(typeof memberid === "string", "OdtDocument::addCursor has cursor without memberid");
         runtime.assert(!cursors[memberid], "OdtDocument::addCursor is adding a duplicate cursor with memberid " + memberid);
-        cursor.move(distanceToFirstTextNode);
+        cursor.setSelectedRange(initialSelection, true);
 
         cursors[memberid] = cursor;
     };
@@ -745,9 +832,9 @@ ops.OdtDocument = function OdtDocument(odfCanvas) {
     this.removeCursor = function (memberid) {
         var cursor = cursors[memberid];
         if (cursor) {
-            cursor.removeFromOdtDocument();
+            cursor.removeFromDocument();
             delete cursors[memberid];
-            self.emit(ops.OdtDocument.signalCursorRemoved, memberid);
+            self.emit(ops.Document.signalCursorRemoved, memberid);
             return true;
         }
         return false;
@@ -762,13 +849,13 @@ ops.OdtDocument = function OdtDocument(odfCanvas) {
      * @param {!string} memberid
      * @param {!number} position
      * @param {!number} length
-     * @param {!string} selectionType
+     * @param {!string=} selectionType
      * @return {undefined}
      */
     this.moveCursor = function (memberid, position, length, selectionType) {
         var cursor = cursors[memberid],
             selectionRange = self.convertCursorToDomRange(position, length);
-        if (cursor && selectionRange) {
+        if (cursor) {
             cursor.setSelectedRange(selectionRange, length >= 0);
             cursor.setSelectionType(selectionType || ops.OdtCursor.RangeSelection);
         }
@@ -810,7 +897,7 @@ ops.OdtDocument = function OdtDocument(odfCanvas) {
 
     /**
      * @param {string|!Node} inputMemberId
-     * @reurn {!RootFilter}
+     * @return {!RootFilter}
      */
     this.createRootFilter = function (inputMemberId) {
         return new RootFilter(inputMemberId);
@@ -820,7 +907,7 @@ ops.OdtDocument = function OdtDocument(odfCanvas) {
      * @param {!function(!Object=)} callback, passing an error object in case of error
      * @return {undefined}
      */
-    this.close = function(callback) {
+    this.close = function (callback) {
         // TODO: check if anything needs to be cleaned up
         callback();
     };
@@ -829,7 +916,7 @@ ops.OdtDocument = function OdtDocument(odfCanvas) {
      * @param {!function(!Object=)} callback, passing an error object in case of error
      * @return {undefined}
      */
-    this.destroy = function(callback) {
+    this.destroy = function (callback) {
         callback();
     };
 
@@ -843,23 +930,21 @@ ops.OdtDocument = function OdtDocument(odfCanvas) {
         stepsTranslator = new ops.StepsTranslator(getRootNode, gui.SelectionMover.createPositionIterator, filter, 500);
         eventNotifier.subscribe(ops.OdtDocument.signalStepsInserted, stepsTranslator.handleStepsInserted);
         eventNotifier.subscribe(ops.OdtDocument.signalStepsRemoved, stepsTranslator.handleStepsRemoved);
-        eventNotifier.subscribe(ops.OdtDocument.signalOperationExecuted, handleOperationExecuted);
+        eventNotifier.subscribe(ops.OdtDocument.signalOperationEnd, handleOperationExecuted);
+        eventNotifier.subscribe(ops.OdtDocument.signalProcessingBatchEnd, core.Task.processTasks);
     }
     init();
 };
 
-/**@const*/ops.OdtDocument.signalMemberAdded =   "member/added";
-/**@const*/ops.OdtDocument.signalMemberUpdated =   "member/updated";
-/**@const*/ops.OdtDocument.signalMemberRemoved =   "member/removed";
-/**@const*/ops.OdtDocument.signalCursorAdded =   "cursor/added";
-/**@const*/ops.OdtDocument.signalCursorRemoved = "cursor/removed";
-/**@const*/ops.OdtDocument.signalCursorMoved =   "cursor/moved";
 /**@const*/ops.OdtDocument.signalParagraphChanged = "paragraph/changed";
 /**@const*/ops.OdtDocument.signalTableAdded = "table/added";
 /**@const*/ops.OdtDocument.signalCommonStyleCreated = "style/created";
 /**@const*/ops.OdtDocument.signalCommonStyleDeleted = "style/deleted";
 /**@const*/ops.OdtDocument.signalParagraphStyleModified = "paragraphstyle/modified";
-/**@const*/ops.OdtDocument.signalOperationExecuted = "operation/executed";
+/**@const*/ops.OdtDocument.signalOperationStart = "operation/start";
+/**@const*/ops.OdtDocument.signalOperationEnd = "operation/end";
+/**@const*/ops.OdtDocument.signalProcessingBatchStart = "router/batchstart";
+/**@const*/ops.OdtDocument.signalProcessingBatchEnd = "router/batchend";
 /**@const*/ops.OdtDocument.signalUndoStackChanged = "undo/changed";
 /**@const*/ops.OdtDocument.signalStepsInserted = "steps/inserted";
 /**@const*/ops.OdtDocument.signalStepsRemoved = "steps/removed";

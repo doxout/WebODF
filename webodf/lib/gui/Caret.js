@@ -35,9 +35,6 @@
  */
 /*global core, gui, ops, runtime, Node*/
 
-runtime.loadClass("core.DomUtils");
-runtime.loadClass("gui.Avatar");
-runtime.loadClass("ops.OdtCursor");
 
 /**
  * Class that represents a caret in a document.
@@ -46,6 +43,7 @@ runtime.loadClass("ops.OdtCursor");
  * Blinking is done by switching the color of the border from transparent to
  * the member color and back.
  * @constructor
+ * @implements {core.Destroyable}
  * @param {!ops.OdtCursor} cursor
  * @param {boolean} avatarInitiallyVisible Sets the initial visibility of the caret's avatar
  * @param {boolean} blinkOnRangeSelect Specify that the caret should blink if a non-collapsed range is selected
@@ -58,47 +56,47 @@ gui.Caret = function Caret(cursor, avatarInitiallyVisible, blinkOnRangeSelect) {
         DEFAULT_CARET_TOP = "5%",
         /**@const*/
         DEFAULT_CARET_HEIGHT = "1em",
+        /**@const*/
+        BLINK_PERIOD_MS = 500,
         /**@type{!HTMLSpanElement}*/
         span,
         /**@type{!gui.Avatar}*/
         avatar,
         /**@type{!Element}*/
         cursorNode,
+        /**@type{?Element}*/
+        overlayElement,
+        domUtils = new core.DomUtils(),
+        /**@type{!core.ScheduledTask}*/
+        redrawTask,
+        /**@type{!core.ScheduledTask}*/
+        blinkTask,
         /**@type{boolean}*/
-        isShown = true,
-        shouldBlink = false,
+        shouldResetBlink = false,
         /**@type{boolean}*/
-        blinking = false,
-        blinkTimeout,
-        domUtils = new core.DomUtils();
+        shouldCheckCaretVisibility = false,
+        /**@type{boolean}*/
+        shouldUpdateCaretSize = false,
+        /**@type{!{isFocused:boolean,isShown:boolean,visibility:string}}*/
+        state = {
+            isFocused: false,
+            isShown: true,
+            visibility: "hidden"
+        },
+        /**@type{!{isFocused:boolean,isShown:boolean,visibility:string}}*/
+        lastState = {
+            isFocused: !state.isFocused,
+            isShown: !state.isShown,
+            visibility: "hidden"
+        };
 
     /**
-     * @param {boolean} reset
      * @return {undefined}
      */
-    function blink(reset) {
-        if (!shouldBlink || !cursorNode.parentNode) {
-            // stop blinking when removed from the document
-            return;
-        }
-
-        if (!blinking || reset) {
-            if (reset && blinkTimeout !== undefined) {
-                runtime.clearTimeout(blinkTimeout);
-            }
-
-            blinking = true;
-            // switch between transparent and color
-            span.style.opacity =
-                (reset || span.style.opacity === "0")
-                    ? "1"
-                    : "0";
-
-            blinkTimeout = runtime.setTimeout(function () {
-                blinking = false;
-                blink(false);
-            }, 500);
-        }
+    function blinkCaret() {
+        // switch between transparent and color
+        span.style.opacity = span.style.opacity === "0" ? "1" : "0";
+        blinkTask.trigger(); // Trigger next blink to occur in BLINK_PERIOD_MS
     }
 
     /**
@@ -122,7 +120,7 @@ gui.Caret = function Caret(cursor, avatarInitiallyVisible, blinkOnRangeSelect) {
     /**
      * Return the maximum available offset for the supplied node.
      * @param {!Node} node
-     * @returns {!number}
+     * @return {!number}
      */
     function length(node) {
         return node.nodeType === Node.TEXT_NODE ? node.textContent.length : node.childNodes.length;
@@ -133,7 +131,7 @@ gui.Caret = function Caret(cursor, avatarInitiallyVisible, blinkOnRangeSelect) {
      * this number will be negative
      * @param {!Element} cursorNode
      * @param {!ClientRect} rangeRect
-     * @returns {!number}
+     * @return {!number}
      */
     function verticalOverlap(cursorNode, rangeRect) {
         var cursorRect = cursorNode.getBoundingClientRect(),
@@ -153,7 +151,7 @@ gui.Caret = function Caret(cursor, avatarInitiallyVisible, blinkOnRangeSelect) {
      * This works on the assumption that the next or previous sibling is likely to
      * be a text node that will provide an accurate rectangle for the caret's desired
      * height and vertical position.
-     * @returns {?ClientRect}
+     * @return {?ClientRect}
      */
     function getSelectionRect() {
         var range = cursor.getSelectedRange().cloneRange(),
@@ -206,17 +204,15 @@ gui.Caret = function Caret(cursor, avatarInitiallyVisible, blinkOnRangeSelect) {
      * of the text.
      * Fonts known to cause this problem:
      * - STIXGeneral (MacOS, Chrome & Safari)
+     * @return {undefined}
      */
-    function handleUpdate() {
+    function updateCaretHeightAndPosition() {
         var selectionRect = getSelectionRect(),
-            zoomLevel = cursor.getOdtDocument().getOdfCanvas().getZoomLevel(),
-            caretRect;
-
-        if (isShown && cursor.getSelectionType() === ops.OdtCursor.RangeSelection) {
-            span.style.visibility = "visible";
-        } else {
-            span.style.visibility = "hidden";
-        }
+            canvas = /**@type{!odf.OdfCanvas}*/(cursor.getDocument().getCanvas()),
+            zoomLevel = canvas.getZoomLevel(),
+            rootRect = domUtils.getBoundingClientRect(canvas.getSizer()),
+            caretRect,
+            caretStyle;
 
         if (selectionRect) {
             // Reset the top back to 0 so that the new client rect calculations are simple
@@ -242,52 +238,217 @@ gui.Caret = function Caret(cursor, avatarInitiallyVisible, blinkOnRangeSelect) {
             span.style.height = DEFAULT_CARET_HEIGHT;
             span.style.top = DEFAULT_CARET_TOP;
         }
+
+        // Update the overlay element
+        if (overlayElement) {
+            caretStyle = runtime.getWindow().getComputedStyle(span, null);
+            caretRect = domUtils.getBoundingClientRect(span);
+            overlayElement.style.bottom = domUtils.adaptRangeDifferenceToZoomLevel(rootRect.bottom - caretRect.bottom, zoomLevel) + 'px';
+            overlayElement.style.left = domUtils.adaptRangeDifferenceToZoomLevel(caretRect.right - rootRect.left, zoomLevel) + 'px';
+            if (caretStyle.font) {
+                overlayElement.style.font = caretStyle.font;
+            } else {
+                // On IE, window.getComputedStyle(element).font returns "".
+                // Therefore we need to individually set the font properties.
+                overlayElement.style.fontStyle = caretStyle.fontStyle;
+                overlayElement.style.fontVariant = caretStyle.fontVariant;
+                overlayElement.style.fontWeight = caretStyle.fontWeight;
+                overlayElement.style.fontSize = caretStyle.fontSize;
+                overlayElement.style.lineHeight = caretStyle.lineHeight;
+                overlayElement.style.fontFamily = caretStyle.fontFamily;
+            }
+        }
     }
-    this.handleUpdate = handleUpdate;
-    
+
+    /**
+     * Checks whether the caret is currently in view. If the caret is not on screen,
+     * this will scroll the caret into view.
+     * @return {undefined}
+     */
+    function ensureVisible() {
+        var canvasElement = cursor.getDocument().getCanvas().getElement(),
+            canvasContainerElement = /**@type{!HTMLElement}*/(canvasElement.parentNode),
+            caretRect,
+            canvasContainerRect,
+        // margin around the caret when calculating the visibility,
+        // to have the caret not stick directly to the containing border
+        // size in pixels, and also to avoid it hiding below scrollbars.
+        // The scrollbar width is in most cases the offsetWidth - clientWidth.
+        // We assume a 5px distance from the boundary is A Good Thing.
+            horizontalMargin = canvasContainerElement.offsetWidth - canvasContainerElement.clientWidth + 5,
+            verticalMargin = canvasContainerElement.offsetHeight - canvasContainerElement.clientHeight + 5;
+
+        // The visible part of the canvas is set by changing the
+        // scrollLeft/scrollTop properties of the containing element
+        // accordingly. Both are 0 if the canvas top-left corner is exactly
+        // in the top-left corner of the container.
+        // To find out the proper values for them. these other values are needed:
+        // * position of the caret inside the canvas
+        // * size of the caret
+        // * size of the canvas
+
+        caretRect = getCaretClientRectWithMargin(span, {
+            top: verticalMargin,
+            left: horizontalMargin,
+            bottom: verticalMargin,
+            right: horizontalMargin
+        });
+        canvasContainerRect = canvasContainerElement.getBoundingClientRect();
+
+        // Vertical adjustment
+        if (caretRect.top < canvasContainerRect.top) {
+            canvasContainerElement.scrollTop -= canvasContainerRect.top - caretRect.top;
+        } else if (caretRect.bottom > canvasContainerRect.bottom) {
+            canvasContainerElement.scrollTop += caretRect.bottom - canvasContainerRect.bottom;
+        }
+
+        // Horizontal adjustment
+        if (caretRect.left < canvasContainerRect.left) {
+            canvasContainerElement.scrollLeft -= canvasContainerRect.left - caretRect.left;
+        } else if (caretRect.right > canvasContainerRect.right) {
+            canvasContainerElement.scrollLeft += caretRect.right - canvasContainerRect.right;
+        }
+    }
+
+    /**
+     * Returns true if the requested property is different between the last state
+     * and the current state
+     * @param {!string} property
+     * @return {!boolean}
+     */
+    function hasStateChanged(property) {
+        return lastState[property] !== state[property];
+    }
+
+    /**
+     * Update all properties in the last state to match the current state
+     * @return {undefined}
+     */
+    function saveState() {
+        Object.keys(state).forEach(function (key) {
+            lastState[key] = state[key];
+        });
+    }
+
+    /**
+     * Synchronize the requested caret state & visible state
+     * @return {undefined}
+     */
+    function updateCaret() {
+        if (state.isShown === false || cursor.getSelectionType() !== ops.OdtCursor.RangeSelection
+                || (!blinkOnRangeSelect && !cursor.getSelectedRange().collapsed)) {
+            // Hide the caret entirely if:
+            // - the caret is deliberately hidden (e.g., the parent window has lost focus)
+            // - the selection is not a range selection (e.g., an image has been selected)
+            // - the blinkOnRangeSelect is false and the cursor has a non-collapsed range
+            state.visibility = "hidden";
+            span.style.visibility = "hidden";
+            blinkTask.cancel();
+        } else {
+            // For all other cases, the caret is expected to be visible and either static (isFocused = false), or blinking
+            state.visibility = "visible";
+            span.style.visibility = "visible";
+
+            if (state.isFocused === false) {
+                span.style.opacity = "1";
+                blinkTask.cancel();
+            } else {
+                if (shouldResetBlink || hasStateChanged("visibility")) {
+                    // If the caret has just become visible, reset the opacity so it is immediately shown
+                    span.style.opacity = "1";
+                    // Cancel any existing blink instructions to ensure the opacity is not toggled for BLINK_PERIOD_MS
+                    // It will immediately be rescheduled below so blinking resumes
+                    blinkTask.cancel();
+                }
+                // Set the caret blinking. If the caret was already visible and already blinking,
+                // this call will have no effect.
+                blinkTask.trigger();
+            }
+
+            if (shouldUpdateCaretSize || shouldCheckCaretVisibility || hasStateChanged("visibility")) {
+                // Ensure the caret height and position are correct if the caret has just become visible,
+                // or is just about to be scrolled into view. This is necessary because client rectangles
+                // are not reported when an element is hidden, so the caret size is likely to be out of date
+                // when it is drawn
+                updateCaretHeightAndPosition();
+            }
+
+            if (shouldCheckCaretVisibility) {
+                ensureVisible();
+            }
+        }
+
+        if (hasStateChanged("isFocused")) {
+            // Currently, setting the focus state on the avatar whilst the caret is hidden is harmless
+            avatar.markAsFocussed(state.isFocused);
+        }
+        saveState();
+
+        // Always reset all requested updates after a render. All requests should be ignored while the caret
+        // is hidden, and should not be queued up for later. This prevents unexpected behaviours when re-showing
+        // the caret (e.g., suddenly scrolling the caret into view at an undesirable time later just because
+        // it becomes visible).
+        shouldResetBlink = false;
+        shouldCheckCaretVisibility = false;
+        shouldUpdateCaretSize = false;
+    }
+
+    /**
+     * Recalculate the caret size and position (but don't scroll into view)
+     * @return {undefined}
+     */
+    this.handleUpdate = function() {
+        shouldUpdateCaretSize = true;
+        if (state.visibility !== "hidden") {
+            // There are significant performance costs with calculating the caret size, so still
+            // want to avoid computing this until all ops have been performed.
+            // However, if the caret size is wildly incorrect for it's new position after an update
+            // (e.g., caret moving from beside an image to beside text), the caret will be user visible
+            // before the render occurs, and results in a large caret momentarily flashing before shrinking
+            // to an appropriate size.
+            // To prevent this flicker, we hide the caret until it is redrawn, as an absent caret is far less
+            // noticeable than an oversized one.
+            state.visibility = "hidden";
+            span.style.visibility = "hidden";
+        }
+        redrawTask.trigger();
+    };
+
     /**
      * @return {undefined}
      */
-    this.refreshCursorBlinking = function () {
-        if (blinkOnRangeSelect || cursor.getSelectedRange().collapsed) {
-            shouldBlink = true;
-            blink(true);
-        } else {
-            shouldBlink = false;
-            span.style.opacity = "0";
-        }
+    this.refreshCursorBlinking = function(){
+        shouldResetBlink = true;
+        redrawTask.trigger();
     };
+
     /**
      * @return {undefined}
      */
     this.setFocus = function () {
-        shouldBlink = true;
-        avatar.markAsFocussed(true);
-        blink(true);
+        state.isFocused = true;
+        redrawTask.trigger();
     };
     /**
      * @return {undefined}
      */
     this.removeFocus = function () {
-        shouldBlink = false;
-        avatar.markAsFocussed(false);
-        span.style.opacity = "1";
+        state.isFocused = false;
+        redrawTask.trigger();
     };
     /**
      * @return {undefined}
      */
     this.show = function () {
-        isShown = true;
-        handleUpdate();
-        avatar.markAsFocussed(true);
+        state.isShown = true;
+        redrawTask.trigger();
     };
     /**
      * @return {undefined}
      */
     this.hide = function () {
-        isShown = false;
-        handleUpdate();
-        avatar.markAsFocussed(false);
+        state.isShown = false;
+        redrawTask.trigger();
     };
     /**
      * @param {string} url
@@ -338,76 +499,49 @@ gui.Caret = function Caret(cursor, avatarInitiallyVisible, blinkOnRangeSelect) {
     this.hideHandle = function () {
         avatar.hide();
     };
+
+    /**
+     * @param {!Element} element
+     * @return {undefined}
+     */
+    this.setOverlayElement  = function (element) {
+        overlayElement = element;
+        shouldUpdateCaretSize = true;
+        redrawTask.trigger();
+    };
+
     /**
      * Scrolls the view on the canvas in such a way that the caret is
      * completely visible, with a small margin around.
      * The view on the canvas is only scrolled as much as needed.
      * If the caret is already visible nothing will happen.
+     * @return {undefined}
      */
-    this.ensureVisible = function () {
-        var canvasElement = cursor.getOdtDocument().getOdfCanvas().getElement(),
-            canvasContainerElement = canvasElement.parentNode,
-            caretRect,
-            canvasContainerRect,
-            // margin around the caret when calculating the visibility,
-            // to have the caret not stick directly to the containing border
-            // size in pixels, and also to avoid it hiding below scrollbars.
-            // The scrollbar width is in most cases the offsetWidth - clientWidth.
-            // We assume a 5px distance from the boundary is A Good Thing.
-            horizontalMargin = canvasContainerElement.offsetWidth - canvasContainerElement.clientWidth + 5,
-            verticalMargin = canvasContainerElement.offsetHeight - canvasContainerElement.clientHeight + 5;
-
-        // The visible part of the canvas is set by changing the
-        // scrollLeft/scrollTop properties of the containing element
-        // accordingly. Both are 0 if the canvas top-left corner is exactly
-        // in the top-left corner of the container.
-        // To find out the proper values for them. these other values are needed:
-        // * position of the caret inside the canvas
-        // * size of the caret
-        // * size of the canvas
-
-        caretRect = getCaretClientRectWithMargin(span, {
-            top: verticalMargin,
-            left: horizontalMargin,
-            bottom: verticalMargin,
-            right: horizontalMargin
-        });
-        canvasContainerRect = canvasContainerElement.getBoundingClientRect();
-
-        // Vertical adjustment
-        if (caretRect.top < canvasContainerRect.top) {
-            canvasContainerElement.scrollTop -= canvasContainerRect.top - caretRect.top;
-        } else if (caretRect.bottom > canvasContainerRect.bottom) {
-            canvasContainerElement.scrollTop += caretRect.bottom - canvasContainerRect.bottom;
-        }
-
-        // Horizontal adjustment
-        if (caretRect.left < canvasContainerRect.left) {
-            canvasContainerElement.scrollLeft -= canvasContainerRect.left - caretRect.left;
-        } else if (caretRect.right > canvasContainerRect.right) {
-            canvasContainerElement.scrollLeft += caretRect.right - canvasContainerRect.right;
-        }
-        handleUpdate();
+    this.ensureVisible = function() {
+        shouldCheckCaretVisibility = true;
+        redrawTask.trigger();
     };
+
+    /**
+     * @param {!function(!Object=)} callback
+     * @return {undefined}
+     */
+    function destroy(callback) {
+        cursorNode.removeChild(span);
+        callback();
+    }
 
     /**
      * @param {!function(!Object=)} callback Callback to call when the destroy is complete, passing an error object in case of error
      * @return {undefined}
      */
     this.destroy = function (callback) {
-        runtime.clearTimeout(blinkTimeout);
-        avatar.destroy(function (err) {
-            if (err) {
-                callback(err);
-            } else {
-                cursorNode.removeChild(span);
-                callback();
-            }
-        });
+        var cleanup = [redrawTask.destroy, blinkTask.destroy, avatar.destroy, destroy];
+        core.Async.destroyAll(cleanup, callback);
     };
-    
+
     function init() {
-        var dom = cursor.getOdtDocument().getDOM(),
+        var dom = cursor.getDocument().getDOMDocument(),
             htmlns = dom.documentElement.namespaceURI;
         span = /**@type{!HTMLSpanElement}*/(dom.createElementNS(htmlns, "span"));
         span.className = "caret";
@@ -415,7 +549,9 @@ gui.Caret = function Caret(cursor, avatarInitiallyVisible, blinkOnRangeSelect) {
         cursorNode = cursor.getNode();
         cursorNode.appendChild(span);
         avatar = new gui.Avatar(cursorNode, avatarInitiallyVisible);
-        handleUpdate();
+        redrawTask = core.Task.createRedrawTask(updateCaret);
+        blinkTask = core.Task.createTimeoutTask(blinkCaret, BLINK_PERIOD_MS);
+        redrawTask.triggerImmediate();
     }
     init();
 };

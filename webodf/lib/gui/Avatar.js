@@ -40,6 +40,7 @@
  * It will always keep a relative distance to that element, so automatically
  * move around with the parent element.
  * @constructor
+ * @implements {core.Destroyable}
  * @param {!Element} parentElement
  * @param {boolean} avatarInitiallyVisible Sets the initial visibility of the avatar
  */
@@ -98,7 +99,11 @@ gui.Avatar = function Avatar(parentElement, avatarInitiallyVisible) {
      * @return {undefined}
      */
     this.markAsFocussed = function (isFocussed) {
-        handle.className = (isFocussed ? "active" : "");
+        if (isFocussed) {
+            handle.classList.add("active");
+        } else {
+            handle.classList.remove("active");
+        }
     };
 
     /**

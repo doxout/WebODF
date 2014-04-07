@@ -37,18 +37,18 @@
  */
 
 /*global Node, core, ops, runtime, NodeFilter, Range*/
-/*jslint bitwise: true*/
 
 (function () {
     "use strict";
-    var /**@type{!{rangeBCRIgnoresElementBCR: boolean, unscaledRangeClientRects: boolean}}*/
+    var /**@type{!{rangeBCRIgnoresElementBCR: boolean, unscaledRangeClientRects: boolean, elementBCRIgnoresBodyScroll: !boolean}}*/
         browserQuirks;
 
     /**
      * Detect various browser quirks
      * unscaledRangeClientRects - Firefox doesn't apply parent css transforms to any range client rectangles
      * rangeBCRIgnoresElementBCR - Internet explorer returns 0 client rects for an empty element that has fixed dimensions
-     * @returns {!{unscaledRangeClientRects: !boolean, rangeBCRIgnoresElementBCR: !boolean}}
+     * elementBCRIgnoresBodyScroll - iOS safari returns false client rects for an element that do not correlate with a scrolled body
+     * @return {!{unscaledRangeClientRects: !boolean, rangeBCRIgnoresElementBCR: !boolean, elementBCRIgnoresBodyScroll: !boolean}}
      */
     function getBrowserQuirks() {
         var range,
@@ -58,14 +58,23 @@
             testElement,
             detectedQuirks,
             window,
-            document;
+            document,
+            docElement,
+            body,
+            docOverflow,
+            bodyOverflow,
+            bodyHeight,
+            bodyScroll;
 
         if (browserQuirks === undefined) {
             window = runtime.getWindow();
             document = window && window.document;
+            docElement = document.documentElement;
+            body = document.body;
             browserQuirks = {
                 rangeBCRIgnoresElementBCR: false,
-                unscaledRangeClientRects: false
+                unscaledRangeClientRects: false,
+                elementBCRIgnoresBodyScroll: false
             };
             if (document) {
                 testContainer = document.createElement("div");
@@ -76,7 +85,7 @@
 
                 testElement = document.createElement("div");
                 testContainer.appendChild(testElement);
-                document.body.appendChild(testContainer);
+                body.appendChild(testContainer);
                 range = document.createRange();
                 range.selectNode(testElement);
                 // Internet explorer (v10 and others?) will omit the element's own client rect from
@@ -91,9 +100,33 @@
                 // Depending on the browser, client rects can sometimes have sub-pixel rounding effects, so
                 // add some wiggle room for this. The scale is 200%, so there is no issues with false positives here
                 browserQuirks.unscaledRangeClientRects = Math.abs(directBoundingRect.height - rangeBoundingRect.height) > 2;
-                range.detach();
 
-                document.body.removeChild(testContainer);
+                testContainer.style.transform = "";
+                testContainer.style["-webkit-transform"] = "";
+                // Backup current values for documentElement and body's overflows, body height, and body scroll.
+                docOverflow = docElement.style.overflow;
+                bodyOverflow = body.style.overflow;
+                bodyHeight = body.style.height;
+                bodyScroll = body.scrollTop;
+                // Set new values for the backed up properties
+                docElement.style.overflow = "visible";
+                body.style.overflow = "visible";
+                body.style.height = "200%";
+                body.scrollTop = body.scrollHeight;
+                // After extending the body's height to twice and scrolling by that amount,
+                // if the element's new BCR is not the same as the range's BCR, then
+                // Houston we have a Quirk! This problem has been seen on iOS7, which
+                // seems to report the correct BCR for a range but ignores body scroll
+                // effects on an element...
+                browserQuirks.elementBCRIgnoresBodyScroll = (range.getBoundingClientRect().top !== testElement.getBoundingClientRect().top);
+                // Restore backed up property values
+                body.scrollTop = bodyScroll;
+                body.style.height = bodyHeight;
+                body.style.overflow = bodyOverflow;
+                docElement.style.overflow = docOverflow;
+
+                range.detach();
+                body.removeChild(testContainer);
                 detectedQuirks = Object.keys(browserQuirks).map(
                     /**
                      * @param {!string} quirk
@@ -107,6 +140,26 @@
             }
         }
         return browserQuirks;
+    }
+
+    /**
+     * Return the first child element with the given namespace and name.
+     * If the parent is null, or if there is no child with the given name and
+     * namespace, null is returned.
+     * @param {?Element} parent
+     * @param {!string} ns
+     * @param {!string} name
+     * @return {?Element}
+     */
+    function getDirectChild(parent, ns, name) {
+        var node = parent ? parent.firstElementChild : null;
+        while (node) {
+            if (node.localName === name && node.namespaceURI === ns) {
+                return /**@type{!Element}*/(node);
+            }
+            node = node.nextElementSibling;
+        }
+        return null;
     }
 
     /**
@@ -136,7 +189,7 @@
          * to the provided container and offset.
          * @param {!Node} container
          * @param {!number} offset
-         * @returns {{container: Node, offset: !number}}
+         * @return {{container: Node, offset: !number}}
          */
         function findStablePoint(container, offset) {
             var c = container;
@@ -189,7 +242,7 @@
          * only the completely selected text node:
          *  "A" "|BCD|" "E"
          * @param {!Range} range
-         * @returns {!Array.<!Node>} Return a list of nodes modified as a result
+         * @return {!Array.<!Node>} Return a list of nodes modified as a result
          *                           of this split operation. These are often
          *                           processed through
          *                           DomUtils.normalizeTextNodes after all
@@ -264,7 +317,7 @@
          * Aligned boundaries are counted as inclusion
          * @param {!Range} container
          * @param {!Range} insideRange
-         * @returns {boolean}
+         * @return {boolean}
          */
         function containsRange(container, insideRange) {
             return container.compareBoundaryPoints(Range.START_TO_START, insideRange) <= 0
@@ -276,7 +329,7 @@
          * Returns true if there is any intersection between range1 and range2
          * @param {!Range} range1
          * @param {!Range} range2
-         * @returns {boolean}
+         * @return {boolean}
          */
         function rangesIntersect(range1, range2) {
             return range1.compareBoundaryPoints(Range.END_TO_START, range2) <= 0
@@ -285,41 +338,141 @@
         this.rangesIntersect = rangesIntersect;
 
         /**
+         * Returns the maximum available offset for the node. If this is a text
+         * node, this will be node.length, or for an element node, childNodes.length
+         * @param {!Node} node
+         * @return {!number}
+         */
+        function maximumOffset(node) {
+            return node.nodeType === Node.TEXT_NODE ? /**@type{!Text}*/(node).length : node.childNodes.length;
+        }
+
+        /**
+         * Checks all nodes between the tree walker's current node and the defined
+         * root. If any nodes are rejected, the tree walker is moved to the
+         * highest rejected node below the root. Note, the root is excluded from
+         * this check.
+         *
+         * This logic is similar to PositionIterator.moveToAcceptedNode
+         * @param {!TreeWalker} walker
+         * @param {!Node} root
+         * @param {!function(!Node) : number} nodeFilter
+         *
+         * @return {!Node} Returns the current node the walker is on
+         */
+        function moveToNonRejectedNode(walker, root, nodeFilter) {
+            var node = walker.currentNode;
+
+            // Ensure currentNode is not within a rejected subtree by crawling each parent node
+            // up to the root and verifying it is either accepted or skipped by the nodeFilter.
+            // NOTE: The root is deliberately not checked as it is the container iteration happens within.
+            if (node !== root) {
+                node = node.parentNode;
+                while (node && node !== root) {
+                    if (nodeFilter(node) === NodeFilter.FILTER_REJECT) {
+                        walker.currentNode = node;
+                    }
+                    node = node.parentNode;
+                }
+            }
+            return walker.currentNode;
+        }
+
+        /**
          * Fetches all nodes within a supplied range that pass the required filter
          * @param {!Range} range
          * @param {!function(!Node) : number} nodeFilter
-         * @returns {!Array.<Node>}
+         * @param {!number} whatToShow
+         * @return {!Array.<Node>}
          */
-        function getNodesInRange(range, nodeFilter) {
+        /*jslint bitwise:true*/
+        function getNodesInRange(range, nodeFilter, whatToShow) {
             var document = range.startContainer.ownerDocument,
                 elements = [],
                 rangeRoot = range.commonAncestorContainer,
                 root = /**@type{!Node}*/(rangeRoot.nodeType === Node.TEXT_NODE ? rangeRoot.parentNode : rangeRoot),
-                n,
-                filterResult,
-                treeWalker = document.createTreeWalker(root, NodeFilter.SHOW_ALL, nodeFilter, false);
+                treeWalker = document.createTreeWalker(root, whatToShow, nodeFilter, false),
+                currentNode,
+                lastNodeInRange,
+                endNodeCompareFlags,
+                comparePositionResult;
 
-            treeWalker.currentNode = range.startContainer;
-            n = range.startContainer;
-            while (n) {
-                filterResult = nodeFilter(n);
-                if (filterResult === NodeFilter.FILTER_ACCEPT) {
-                    elements.push(n);
-                } else if (filterResult === NodeFilter.FILTER_REJECT) {
-                    break;
+            if (range.endContainer.childNodes[range.endOffset - 1]) {
+                // This is the last node completely contained in the range
+                lastNodeInRange = /**@type{!Node}*/(range.endContainer.childNodes[range.endOffset - 1]);
+                // Accept anything preceding or contained by this node.
+                endNodeCompareFlags = Node.DOCUMENT_POSITION_PRECEDING | Node.DOCUMENT_POSITION_CONTAINED_BY;
+            } else {
+                // Either no child nodes (e.g., TEXT_NODE) or endOffset = 0
+                lastNodeInRange = /**@type{!Node}*/(range.endContainer);
+                // Don't accept things contained within this node, as the range ends before this node's children.
+                // This is the last node touching the range though, so the node is still accepted into the results.
+                endNodeCompareFlags = Node.DOCUMENT_POSITION_PRECEDING;
+            }
+
+            if (range.startContainer.childNodes[range.startOffset]) {
+                // The range starts within startContainer, so this child node is the first node in the range
+                currentNode = /**@type{!Node}*/(range.startContainer.childNodes[range.startOffset]);
+                treeWalker.currentNode = currentNode;
+            } else if (range.startOffset === maximumOffset(range.startContainer)) {
+                // This condition will be true if the range starts beyond the last position of a node
+                // E.g., (text, text.length) or (div, div.childNodes.length)
+                currentNode = /**@type{!Node}*/(range.startContainer);
+                treeWalker.currentNode = currentNode;
+                // In this case, move to the last child (if the node has children)
+                treeWalker.lastChild(); // May return null if the current node has no children
+                // And navigate onto the next node in sequence
+                currentNode = treeWalker.nextNode();
+            } else {
+                // This will only be hit for a text node that is partially overlapped by the range start
+                currentNode = /**@type{!Node}*/(range.startContainer);
+                treeWalker.currentNode = currentNode;
+            }
+
+            if (currentNode) {
+                // If the treeWalker hit the end of the sequence in the treeWalker.nextNode line just above,
+                // currentNode will be null.
+                currentNode = moveToNonRejectedNode(treeWalker, root, nodeFilter);
+                switch (nodeFilter(/**@type{!Node}*/(currentNode))) {
+                    case NodeFilter.FILTER_REJECT:
+                        // If started on a rejected node, calling nextNode will incorrectly
+                        // dive down into the rejected node's children. Instead, advance to
+                        // the next sibling or parent node's sibling and resume walking from
+                        // there.
+                        currentNode = treeWalker.nextSibling();
+                        while (!currentNode && treeWalker.parentNode()) {
+                            currentNode = treeWalker.nextSibling();
+                        }
+                        break;
+                    case NodeFilter.FILTER_ACCEPT:
+                        // The first call to nextNode will return the next node *after* walker.currentNode
+                        // Therefore, need to manually check if currentNode should be included in the elements array
+                        // and save it if it passes the filter
+                        elements.push(currentNode);
+                        currentNode = treeWalker.nextNode();
+                        break;
+                    default:
+                    // case NodeFilter.FILTER_SKIP:
+                        currentNode = treeWalker.nextNode();
+                        break;
                 }
-                n = n.parentNode;
-            }
-            // The expected sequence is outer-most to inner-most element, thus, the array just built needs to be reversed
-            elements.reverse();
 
-            n = treeWalker.nextNode();
-            while (n) {
-                elements.push(n);
-                n = treeWalker.nextNode();
+                while (currentNode) {
+                    comparePositionResult = lastNodeInRange.compareDocumentPosition(currentNode);
+                    if (comparePositionResult !== 0 && (comparePositionResult & endNodeCompareFlags) === 0) {
+                        // comparePositionResult === 0 if currentNode === lastNodeInRange. This is considered within the range
+                        // comparePositionResult & endNodeCompareFlags would be non-zero if n precedes lastNodeInRange
+                        // If either of these statements are false, currentNode is past the end of the range
+                        break;
+                    }
+                    elements.push(currentNode);
+                    currentNode = treeWalker.nextNode();
+                }
             }
+
             return elements;
         }
+        /*jslint bitwise:false*/
         this.getNodesInRange = getNodesInRange;
 
         /**
@@ -375,9 +528,9 @@
 
         /**
          * Checks if the provided limits fully encompass the passed in node
-         * @param {{startContainer: Node, startOffset: !number, endContainer: Node, endOffset: !number}} limits
+         * @param {!Range|{startContainer: Node, startOffset: !number, endContainer: Node, endOffset: !number}} limits
          * @param {!Node} node
-         * @returns {boolean} Returns true if the node is fully contained within
+         * @return {boolean} Returns true if the node is fully contained within
          *                    the range
          */
         function rangeContainsNode(limits, node) {
@@ -399,8 +552,8 @@
 
         /**
          * Merge all child nodes into the targetNode's parent and remove the targetNode entirely
-         * @param {Node} targetNode
-         * @return {Node} parent of targetNode
+         * @param {!Node} targetNode
+         * @return {!Node} parent of targetNode
          */
         function mergeIntoParent(targetNode) {
             var parent = targetNode.parentNode;
@@ -413,10 +566,10 @@
         this.mergeIntoParent = mergeIntoParent;
 
         /**
-         * Removes all unwanted nodes from targetNodes includes itself.
-         * @param {Node} targetNode
-         * @param {function(Node):!boolean} shouldRemove check whether a node should be removed or not
-         * @return {Node} parent of targetNode
+         * Removes all unwanted nodes from targetNode includes itself.
+         * @param {!Node} targetNode
+         * @param {function(!Node):!boolean} shouldRemove check whether a node should be removed or not
+         * @return {?Node} parent of targetNode
          */
         function removeUnwantedNodes(targetNode, shouldRemove) {
             var parent = targetNode.parentNode,
@@ -427,8 +580,8 @@
                 removeUnwantedNodes(node, shouldRemove);
                 node = next;
             }
-            if (shouldRemove(targetNode)) {
-                parent = mergeIntoParent(targetNode);
+            if (parent && shouldRemove(targetNode)) {
+                mergeIntoParent(targetNode);
             }
             return parent;
         }
@@ -439,7 +592,7 @@
          * @param {!Element|!Document} node
          * @param {!string} namespace
          * @param {!string} tagName
-         * @returns {!Array.<!Element>}
+         * @return {!Array.<!Element>}
          */
         function getElementsByTagNameNS(node, namespace, tagName) {
             var e = [], list, i, l;
@@ -451,23 +604,6 @@
             return e;
         }
         this.getElementsByTagNameNS = getElementsByTagNameNS;
-
-        /**
-         * @param {!Range} range
-         * @param {!Node} node
-         * @return {!boolean}
-         */
-        function rangeIntersectsNode(range, node) {
-            var nodeRange = node.ownerDocument.createRange(),
-                result;
-
-            nodeRange.selectNodeContents(node);
-            result = rangesIntersect(range, nodeRange);
-            nodeRange.detach();
-
-            return result;
-        }
-        this.rangeIntersectsNode = rangeIntersectsNode;
 
         /**
          * Whether a node contains another node
@@ -491,12 +627,14 @@
          * @param {?Node} descendant The node to test presence of
          * @return {!boolean}
          */
+        /*jslint bitwise:true*/
         function containsNodeForBrokenWebKit(parent, descendant) {
             // the contains function is not reliable on safari/webkit so use
             // compareDocumentPosition instead
             return parent === descendant ||
                 Boolean(parent.compareDocumentPosition(descendant) & Node.DOCUMENT_POSITION_CONTAINED_BY);
         }
+        /*jslint bitwise:false*/
 
         /**
          * Return a number > 0 when point 1 precedes point 2. Return 0 if the points
@@ -543,7 +681,7 @@
          *                              a property on two range-sourced client
          *                              rectangles (e.g., rect1.top - rect2.top)
          * @param {!number} zoomLevel   Current canvas zoom level
-         * @returns {!number}
+         * @return {!number}
          */
         function adaptRangeDifferenceToZoomLevel(inputNumber, zoomLevel) {
             if (getBrowserQuirks().unscaledRangeClientRects) {
@@ -563,19 +701,32 @@
          * transformed in the same way.
          * See https://bugzilla.mozilla.org/show_bug.cgi?id=863618
          * @param {!Node} node
-         * @returns {?ClientRect}
+         * @return {?ClientRect}
          */
         function getBoundingClientRect(node) {
             var doc = /**@type{!Document}*/(node.ownerDocument),
                 quirks = getBrowserQuirks(),
                 range,
-                element;
+                element,
+                rect,
+                body = doc.body;
 
             if (quirks.unscaledRangeClientRects === false
                     || quirks.rangeBCRIgnoresElementBCR) {
                 if (node.nodeType === Node.ELEMENT_NODE) {
                     element = /**@type{!Element}*/(node);
-                    return element.getBoundingClientRect();
+                    rect = element.getBoundingClientRect();
+                    if (quirks.elementBCRIgnoresBodyScroll) {
+                        return /**@type{?ClientRect}*/({
+                            left: rect.left + body.scrollLeft,
+                            right: rect.right + body.scrollLeft,
+                            top: rect.top + body.scrollTop,
+                            bottom: rect.bottom + body.scrollTop,
+                            width: rect.width,
+                            height: rect.height
+                        });
+                    }
+                    return rect;
                 }
             }
             range = getSharedRange(doc);
@@ -691,6 +842,12 @@
         /**
          * Maps attributes and elements in the properties object over top of the node.
          * Supports recursion and deep mapping.
+         *
+         * Supported value types are:
+         * - string (mapped to an attribute string on node)
+         * - number (mapped to an attribute string on node)
+         * - object (deep mapped to a new child node on node)
+         *
          * @param {!Element} node
          * @param {!Object.<string,*>} properties
          * @param {!function(!string):?string} nsResolver
@@ -702,25 +859,33 @@
                     localName = parts[1],
                     ns = nsResolver(prefix),
                     value = properties[key],
+                    valueType = typeof value,
                     element;
 
-                if (typeof value === "object" && Object.keys(/**@type{!Object}*/(value)).length) {
-                    if (ns) {
-                        element = /**@type{!Element|undefined}*/(node.getElementsByTagNameNS(ns, localName)[0])
-                            || node.ownerDocument.createElementNS(ns, key);
-                    } else {
-                        element = /**@type{!Element|undefined}*/(node.getElementsByTagName(localName)[0])
-                            || node.ownerDocument.createElement(key);
+                if (valueType === "object") {
+                    // Only create the destination sub-element if there are values to populate it with
+                    if (Object.keys(/**@type{!Object}*/(value)).length) {
+                        if (ns) {
+                            element = /**@type{!Element|undefined}*/(node.getElementsByTagNameNS(ns, localName)[0])
+                                || node.ownerDocument.createElementNS(ns, key);
+                        } else {
+                            element = /**@type{!Element|undefined}*/(node.getElementsByTagName(localName)[0])
+                                || node.ownerDocument.createElement(key);
+                        }
+                        node.appendChild(element);
+                        mapObjOntoNode(element, /**@type{!Object}*/(value), nsResolver);
                     }
-                    node.appendChild(element);
-                    mapObjOntoNode(element, /**@type{!Object}*/(value), nsResolver);
                 } else if (ns) {
-                    // If the prefix is unknown or unsupported, simply ignore it for now
+                    runtime.assert(valueType === "number" || valueType === "string",
+                        "attempting to map unsupported type '" + valueType + "' (key: " + key + ")");
                     node.setAttributeNS(ns, key, String(value));
+                    // If the prefix is unknown or unsupported, simply ignore it for now
                 }
             });
         }
         this.mapObjOntoNode = mapObjOntoNode;
+
+        this.getDirectChild = getDirectChild;
 
         /**
          * @param {!core.DomUtils} self

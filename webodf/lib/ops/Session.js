@@ -38,13 +38,11 @@
 
 /*global runtime, ops, odf*/
 
-runtime.loadClass("ops.TrivialOperationRouter");
-runtime.loadClass("ops.OperationFactory");
-runtime.loadClass("ops.OdtDocument");
 
 /**
  * An editing session and what belongs to it.
  * @constructor
+ * @implements {core.Destroyable}
  * @param {!odf.OdfCanvas} odfCanvas
  */
 ops.Session = function Session(odfCanvas) {
@@ -56,6 +54,24 @@ ops.Session = function Session(odfCanvas) {
         odtDocument = new ops.OdtDocument(odfCanvas),
         /**@type{?ops.OperationRouter}*/
         operationRouter = null;
+
+    /**
+     * Forward the router's batch start signal on to the document
+     * @param {*} args
+     * @return {undefined}
+     */
+    function forwardBatchStart(args) {
+        odtDocument.emit(ops.OdtDocument.signalProcessingBatchStart, args);
+    }
+
+    /**
+     * Forward the router's batch end signal on to the document
+     * @param {*} args
+     * @return {undefined}
+     */
+    function forwardBatchEnd(args) {
+        odtDocument.emit(ops.OdtDocument.signalProcessingBatchEnd, args);
+    }
 
     /**
      * @param {!ops.OperationFactory} opFactory
@@ -72,10 +88,17 @@ ops.Session = function Session(odfCanvas) {
      * @return {undefined}
      */
     this.setOperationRouter = function (opRouter) {
+        if (operationRouter) {
+            operationRouter.unsubscribe(ops.OperationRouter.signalProcessingBatchStart, forwardBatchStart);
+            operationRouter.unsubscribe(ops.OperationRouter.signalProcessingBatchEnd, forwardBatchEnd);
+        }
         operationRouter = opRouter;
+        operationRouter.subscribe(ops.OperationRouter.signalProcessingBatchStart, forwardBatchStart);
+        operationRouter.subscribe(ops.OperationRouter.signalProcessingBatchEnd, forwardBatchEnd);
         opRouter.setPlaybackFunction(function (op) {
+            odtDocument.emit(ops.OdtDocument.signalOperationStart, op);
             if (op.execute(odtDocument)) {
-                odtDocument.emit(ops.OdtDocument.signalOperationExecuted, op);
+                odtDocument.emit(ops.OdtDocument.signalOperationEnd, op);
                 return true;
             }
             return false;
@@ -84,7 +107,7 @@ ops.Session = function Session(odfCanvas) {
     };
 
     /**
-     * @returns {!ops.OperationFactory}
+     * @return {!ops.OperationFactory}
      */
     this.getOperationFactory = function () {
         return operationFactory;
@@ -111,8 +134,8 @@ ops.Session = function Session(odfCanvas) {
      * @param {!function(!Object=)} callback, passing an error object in case of error
      * @return {undefined}
      */
-    this.close = function(callback) {
-        operationRouter.close(function(err) {
+    this.close = function (callback) {
+        operationRouter.close(function (err) {
             if (err) {
                 callback(err);
             } else {
@@ -125,7 +148,7 @@ ops.Session = function Session(odfCanvas) {
      * @param {!function(!Object=)} callback, passing an error object in case of error
      * @return {undefined}
      */
-    this.destroy = function(callback) {
+    this.destroy = function (callback) {
         /*
         operationRouter.destroy(function(err) {
             if (err) {

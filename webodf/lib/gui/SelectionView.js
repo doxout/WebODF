@@ -61,14 +61,8 @@ gui.SelectionView.prototype.show = function() { "use strict"; };
 gui.SelectionView.prototype.hide = function() { "use strict"; };
 
 /**
- * Returns if the selection view is visible or hidden
- * @return {undefined}
- */
-gui.SelectionView.prototype.visible = function() { "use strict"; };
-
-/**
  * Clear all overlay from the DOM
- * @param {function(?string)} callback
+ * @param {function(!Object=)} callback
  * @return {undefined}
  */
 gui.SelectionView.prototype.destroy = function (callback) { "use strict"; };

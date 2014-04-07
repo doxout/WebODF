@@ -38,9 +38,6 @@
 
 /*global ops, runtime, gui, odf, Node, core*/
 
-runtime.loadClass("core.DomUtils");
-runtime.loadClass("odf.OdfUtils");
-runtime.loadClass("odf.TextStyleApplicator");
 
 /**
  * @constructor
@@ -58,6 +55,9 @@ ops.OpApplyDirectStyling = function OpApplyDirectStyling() {
         odfUtils = new odf.OdfUtils(),
         domUtils = new core.DomUtils();
 
+    /**
+     * @param {!ops.OpApplyDirectStyling.InitSpec} data
+     */
     this.init = function (data) {
         memberid = data.memberid;
         timestamp = data.timestamp;
@@ -67,10 +67,12 @@ ops.OpApplyDirectStyling = function OpApplyDirectStyling() {
     };
 
     this.isEdit = true;
+    this.group = undefined;
 
     /**
      * Apply the specified style properties to all elements within the given range.
      * Currently, only text styles are applied.
+     * @param {!ops.OdtDocument} odtDocument
      * @param {!Range} range Range to apply text style to
      * @param {!Object} info Style information. Only data within "style:text-properties" will be considered and applied
      */
@@ -79,29 +81,24 @@ ops.OpApplyDirectStyling = function OpApplyDirectStyling() {
             odfContainer = odfCanvas.odfContainer(),
             nextTextNodes = domUtils.splitBoundaries(range),
             textNodes = odfUtils.getTextNodes(range, false),
-            limits,
             textStyles;
-
-        // Avoid using the passed in range as boundaries move in strange ways as the DOM is modified
-        limits = {
-            startContainer: range.startContainer,
-            startOffset: range.startOffset,
-            endContainer: range.endContainer,
-            endOffset: range.endOffset
-        };
 
         textStyles = new odf.TextStyleApplicator(
             new odf.ObjectNameGenerator(/**@type{!odf.OdfContainer}*/(odfContainer), memberid), // TODO: use the instance in SessionController
             odtDocument.getFormatting(),
             odfContainer.rootElement.automaticStyles
         );
-        textStyles.applyStyle(textNodes, limits, info);
+        textStyles.applyStyle(textNodes, range, info);
         nextTextNodes.forEach(domUtils.normalizeTextNodes);
     }
 
-    this.execute = function (odtDocument) {
-        var range = odtDocument.convertCursorToDomRange(position, length),
-            impactedParagraphs = odfUtils.getImpactedParagraphs(range);
+    /**
+     * @param {!ops.Document} document
+     */
+    this.execute = function (document) {
+        var odtDocument = /**@type{ops.OdtDocument}*/(document),
+            range = odtDocument.convertCursorToDomRange(position, length),
+            impactedParagraphs = odfUtils.getParagraphElements(range);
 
         applyStyle(odtDocument, range, setProperties);
 
@@ -121,6 +118,9 @@ ops.OpApplyDirectStyling = function OpApplyDirectStyling() {
         return true;
     };
 
+    /**
+     * @return {!ops.OpApplyDirectStyling.Spec}
+     */
     this.spec = function () {
         return {
             optype: "ApplyDirectStyling",
@@ -136,7 +136,16 @@ ops.OpApplyDirectStyling = function OpApplyDirectStyling() {
     optype:string,
     memberid:string,
     timestamp:number,
+    position:number,
     length:number,
-    setProperties:Object
+    setProperties:!Object
 }}*/
 ops.OpApplyDirectStyling.Spec;
+/**@typedef{{
+    memberid:string,
+    timestamp:(number|undefined),
+    position:number,
+    length:number,
+    setProperties:!Object
+}}*/
+ops.OpApplyDirectStyling.InitSpec;

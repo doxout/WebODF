@@ -54,8 +54,18 @@ ops.OpInsertText = function OpInsertText() {
 
     var space = " ",
         tab = "\t",
-        memberid, timestamp, position, text, moveCursor;
+        memberid,
+        timestamp,
+        /**@type{number}*/
+        position,
+        /**@type{boolean}*/
+        moveCursor,
+        /**@type{string}*/
+        text;
 
+    /**
+     * @param {!ops.OpInsertText.InitSpec} data
+     */
     this.init = function (data) {
         memberid = data.memberid;
         timestamp = data.timestamp;
@@ -65,6 +75,7 @@ ops.OpInsertText = function OpInsertText() {
     };
 
     this.isEdit = true;
+    this.group = undefined;
 
     /**
      * This is a workaround for a bug where webkit forgets to relayout
@@ -87,18 +98,23 @@ ops.OpInsertText = function OpInsertText() {
      * Logic is based on http://docs.oasis-open.org/office/v1.2/os/OpenDocument-v1.2-os-part1.html#element-text_s
      * @param {!string} text
      * @param {!number} index
-     * @returns {boolean}
+     * @return {boolean}
      */
     function requiresSpaceElement(text, index) {
         return text[index] === space && (index === 0 || index === text.length - 1 || text[index - 1] === space);
     }
 
-    this.execute = function (odtDocument) {
-        var domPosition,
+    /**
+     * @param {!ops.Document} document
+     */
+    this.execute = function (document) {
+        var odtDocument = /**@type{ops.OdtDocument}*/(document),
+            domPosition,
             previousNode,
+            /**@type{!Element}*/
             parentElement,
             nextNode = null,
-            ownerDocument = odtDocument.getDOM(),
+            ownerDocument = odtDocument.getDOMDocument(),
             paragraphElement,
             textns = "urn:oasis:names:tc:opendocument:xmlns:text:1.0",
             toInsertIndex = 0,
@@ -107,6 +123,9 @@ ops.OpInsertText = function OpInsertText() {
             cursor = odtDocument.getCursor(memberid),
             i;
 
+        /**
+         * @param {string} toInsertText
+         */
         function insertTextNode(toInsertText) {
             parentElement.insertBefore(ownerDocument.createTextNode(toInsertText), nextNode);
         }
@@ -117,7 +136,7 @@ ops.OpInsertText = function OpInsertText() {
         if (domPosition) {
             previousNode = domPosition.textNode;
             nextNode = previousNode.nextSibling;
-            parentElement = previousNode.parentNode;
+            parentElement = /**@type{!Element}*/(previousNode.parentNode);
             paragraphElement = odtDocument.getParagraphElement(previousNode);
 
             // first do the insertion with any contained tabs or spaces
@@ -176,7 +195,7 @@ ops.OpInsertText = function OpInsertText() {
                 // the textnode + cursor reordering logic from OdtDocument's
                 // getTextNodeAtStep.
                 odtDocument.moveCursor(memberid, position + text.length, 0);
-                odtDocument.emit(ops.OdtDocument.signalCursorMoved, cursor);
+                odtDocument.emit(ops.Document.signalCursorMoved, cursor);
             }
 
             if (position > 0) {
@@ -206,6 +225,9 @@ ops.OpInsertText = function OpInsertText() {
         return false;
     };
 
+    /**
+     * @return {!ops.OpInsertText.Spec}
+     */
     this.spec = function () {
         return {
             optype: "InsertText",
@@ -226,3 +248,11 @@ ops.OpInsertText = function OpInsertText() {
     moveCursor:boolean
 }}*/
 ops.OpInsertText.Spec;
+/**@typedef{{
+    memberid:string,
+    timestamp:(number|undefined),
+    position:number,
+    text:string,
+    moveCursor:(string|boolean|undefined)
+}}*/
+ops.OpInsertText.InitSpec;

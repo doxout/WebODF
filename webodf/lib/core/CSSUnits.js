@@ -49,7 +49,8 @@ core.CSSUnits = function CSSUnits() {
             "cm": 2.54,
             "mm": 25.4,
             "pt": 72,
-            "pc": 12
+            "pc": 12,
+            "px": 96
         };
 
     /**
@@ -64,10 +65,10 @@ core.CSSUnits = function CSSUnits() {
     };
 
     /**
-     * Takes a measure such as "2cm" and returns it's measurement in newUnit, e.g. "20mm"
+     * Takes a measure such as "2cm" and returns it's measurement in the new unit, e.g. 20
      * @param {!string} measure
      * @param {!string} newUnit
-     * @return {string}
+     * @return {!number|undefined}
      */
     this.convertMeasure = function (measure, newUnit) {
         var value, oldUnit, newMeasure;
@@ -75,9 +76,7 @@ core.CSSUnits = function CSSUnits() {
             value = parseFloat(measure);
             oldUnit = measure.replace(value.toString(), "");
 
-            newMeasure = self.convert(value, oldUnit, newUnit).toString();
-        } else {
-            newMeasure = '';
+            newMeasure = self.convert(value, oldUnit, newUnit);
         }
         return newMeasure;
     };

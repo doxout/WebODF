@@ -54,6 +54,28 @@ define("webodf/editor/Editor", [
 
         runtime.loadClass('odf.OdfCanvas');
 
+        var editorInstanceCounter = 0;
+
+        // Extend runtime with a convenient translation function
+        runtime.translateContent = function (node) {
+            var i,
+                element,
+                tag,
+                placeholder,
+                translatable = node.querySelectorAll("*[text-i18n]");
+
+            for (i = 0; i < translatable.length; i += 1) {
+                element = translatable[i];
+                tag = element.localName;
+                placeholder = element.getAttribute('text-i18n');
+                if (tag === "label"
+                        || tag === "span"
+                        || /h\d/i.test(tag)) {
+                    element.textContent = runtime.tr(placeholder);
+                }
+            }
+        };
+
         /**
          * @constructor
          * @param {{unstableFeaturesEnabled:boolean,
@@ -63,12 +85,20 @@ define("webodf/editor/Editor", [
          * param {!ops.Server=} server
          * @param {!ServerFactory=} serverFactory
          */
-        function Editor(args, server, serverFactory) {
+        function Editor(mainContainerElementId, args, server, serverFactory) {
 
             var self = this,
                 // Private
                 session,
                 editorSession,
+                //
+                mainContainerElement,
+                editorElement,
+                toolbarContainerElement, // container needed because dijit toolbar overwrites direct classList
+                canvasContainerElement,
+                //
+                membersElement,
+                //
                 mainContainer,
                 memberListView,
                 tools,
@@ -95,15 +125,30 @@ define("webodf/editor/Editor", [
                 eventNotifier.emit(eventid, args);
             }
 
-            function getFileBlob(cbSuccess, cbError) {
+            /**
+             * Create an Uint8Array containing the ODT file of the current state of the document
+             * and pass it to the callback method.
+             * Should be only called when a document is loaded, so either between "openDocument"
+             * and "closeDocument" or between "openSession" and "closeSession"
+             * TODO: define error object passed to callback
+             * @param {!function(err:?Object, !Uint8Array=):undefined} cb receiving ODT file as ByteArray
+             * @return {undefined}
+             */
+            function getDocumentAsByteArray(cb) {
                 var odfContainer = odfCanvas.odfContainer();
 
                 if (odfContainer) {
-                    odfContainer.createByteArray(cbSuccess, cbError);
+                    odfContainer.createByteArray(function(ba) {
+                        cb(null, ba);
+                    }, function(err) {
+                        cb(err ? err : "Could not create bytearray.");
+                    });
                 } else {
-                    cbError("No odfContainer!");
+                    cb("No odfContainer!");
                 }
             }
+
+            this.getDocumentAsByteArray = getDocumentAsByteArray;
 
             /**
              * prepare all gui elements and load the given document.
@@ -152,7 +197,6 @@ define("webodf/editor/Editor", [
                         }
                     });
                     session.enqueue([op]);
-                    editorSession.sessionController.registerLocalCursor();
                     editorReadyCallback();
                 });
             };
@@ -201,7 +245,13 @@ define("webodf/editor/Editor", [
              * @return {undefined}
              */
             this.saveDocument = function (filename, callback) {
-                function onsuccess(data) {
+                function onFileBlob(err, data) {
+                    if (err) {
+                        // TODO: use callback for that
+                        alert(error);
+                        return;
+                    }
+
                     var mimebase = "application/vnd.oasis.opendocument.",
                         mimetype = mimebase + "text",
                         blob;
@@ -225,7 +275,7 @@ define("webodf/editor/Editor", [
                 }
 
                 fireEvent(Editor.EVENT_BEFORESAVETOFILE, null);
-                getFileBlob(onsuccess, onerror);
+                getDocumentAsByteArray(onFileBlob);
             };
 
             /**
@@ -321,6 +371,7 @@ define("webodf/editor/Editor", [
                 runtime.assert(editorSession, "editorSession should exist here.");
 
                 tools.setEditorSession(editorSession);
+                editorSession.sessionController.insertLocalCursor();
                 editorSession.sessionController.startEditing();
             };
 
@@ -334,6 +385,7 @@ define("webodf/editor/Editor", [
 
                 tools.setEditorSession(undefined);
                 editorSession.sessionController.endEditing();
+                editorSession.sessionController.removeLocalCursor();
             };
 
             /**
@@ -369,11 +421,71 @@ define("webodf/editor/Editor", [
             };
 
             /**
+             * Temporary util method, to be removed after refactoring
+             * @return {!Element}
+             */
+            this.getCanvasContainerElement = function() {
+                return canvasContainerElement;
+            };
+
+            /**
+             * Applies a CSS transformation to the toolbar
+             * to ensure that if there is a body-scroll,
+             * the toolbar remains visible at the top of
+             * the screen.
+             * The bodyscroll quirk has been observed on
+             * iOS, generally when the keyboard appears.
+             * But this workaround should function on
+             * other platforms that exhibit this behaviour
+             * as well.
+             * @return {undefined}
+             */
+            function translateToolbar() {
+                var bar = toolbarContainerElement,
+                    y = document.body.scrollTop;
+
+                bar.style.WebkitTransformOrigin = "center top";
+                bar.style.WebkitTransform = 'translateY(' + y + 'px)';
+            }
+
+            /**
+             * FIXME: At the moment both the toolbar and the canvas
+             * container are absolutely positioned. Changing them to
+             * relative positioning to ensure that they do not overlap
+             * causes scrollbars *within* the container to disappear.
+             * Not sure why this happens, and a proper CSS fix has not
+             * been found yet, so for now we need to reposition
+             * the container using Js.
+             * @return {undefined}
+             */
+            function repositionContainer() {
+                canvasContainerElement.style.top = toolbarContainerElement.getBoundingClientRect().height + 'px';
+            }
+
+            /**
+             * @param {!function(!Object=)} callback, passing an error object in case of error
+             * @return {undefined}
+             */
+            function destroyInternal(callback) {
+                mainContainerElement.removeChild(editorElement);
+                if (membersElement) {
+                    mainContainerElement.removeChild(membersElement);
+                }
+
+                callback();
+            }
+
+            /**
              * @param {!function(!Object=)} callback, passing an error object in case of error
              * @return {undefined}
              */
             this.destroy = function (callback) {
-                var destroyMemberListView = memberListView ? memberListView.destroy : function(cb) { cb(); };
+                var destroyCallbacks = [];
+
+                window.removeEventListener('scroll', translateToolbar);
+                window.removeEventListener('focusout', translateToolbar);
+                window.removeEventListener('touchmove', translateToolbar);
+                window.removeEventListener('resize', repositionContainer);
 
                 // TODO: decide if some forced close should be done here instead of enforcing proper API usage
                 runtime.assert(!session, "session should not exist here.");
@@ -381,25 +493,16 @@ define("webodf/editor/Editor", [
                 // TODO: investigate what else needs to be done
                 mainContainer.destroyRecursive(true);
 
-                destroyMemberListView(function(err) {
-                    if (err) {
-                        callback(err);
-                    } else {
-                        tools.destroy(function(err) {
-                            if (err) {
-                                callback(err);
-                            } else {
-                                odfCanvas.destroy(function(err) {
-                                    if (err) {
-                                        callback(err);
-                                    } else {
-                                        callback();
-                                    }
-                                });
-                            }
-                        });
-                    }
-                });
+                if (memberListView) {
+                    destroyCallbacks.push(memberListView.destroy);
+                }
+                destroyCallbacks = destroyCallbacks.concat([
+                    tools.destroy,
+                    odfCanvas.destroy,
+                    destroyInternal
+                ]);
+
+                core.Async.destroyAll(destroyCallbacks, callback);
             };
 
             function setFocusToOdfCanvas() {
@@ -409,9 +512,17 @@ define("webodf/editor/Editor", [
             // init
             function init() {
                 var editorPane, memberListPane,
-                    inviteButton,
-                    canvasElement = document.getElementById("canvas"),
-                    memberListElement = document.getElementById('memberList'),
+                    //
+                    editorElementId = "webodfeditor-editor" + editorInstanceCounter,
+                    canvasElementId = "webodfeditor-canvas" + editorInstanceCounter,
+                    canvasElement,
+                    canvasContainerElementId = "webodfeditor-canvascontainer" + editorInstanceCounter,
+                    toolbarElement,
+                    toolbarElementId = "webodfeditor-toolbar" + editorInstanceCounter,
+                    memberListElement,
+                    membersElementId = "webodfeditor-members" + editorInstanceCounter,
+                    documentns = document.documentElement.namespaceURI,
+                    //
                     collabEditing = Boolean(server),
                     directParagraphStylingEnabled = (! collabEditing) || args.unstableFeaturesEnabled,
                     imageInsertingEnabled = (! collabEditing) || args.unstableFeaturesEnabled,
@@ -422,60 +533,65 @@ define("webodf/editor/Editor", [
                     undoRedoEnabled = (! collabEditing),
                     closeCallback;
 
-                // Extend runtime with a convenient translation function
-                runtime.translateContent = function (node) {
-                    var i,
-                        element,
-                        tag,
-                        placeholder,
-                        translatable = node.querySelectorAll("*[text-i18n]");
+                editorInstanceCounter += 1;
 
-                    for (i = 0; i < translatable.length; i += 1) {
-                        element = translatable[i];
-                        tag = element.localName;
-                        placeholder = element.getAttribute('text-i18n');
-                        if (tag === "label"
-                                || tag === "span"
-                                || /h\d/i.test(tag)) {
-                            element.textContent = runtime.tr(placeholder);
-                        }
+                function createElement(tagLocalName, id, className) {
+                    var element;
+                    element = document.createElementNS(documentns, tagLocalName);
+                    if (id) {
+                        element.id = id;
                     }
-                };
-
-                if (collabEditing) {
-                    runtime.assert(memberListElement, 'missing "memberList" div in HTML');
+                    element.classList.add(className);
+                    return element;
                 }
 
-                runtime.assert(canvasElement, 'missing "canvas" div in HTML');
+                mainContainerElement = document.getElementById(mainContainerElementId);
+                runtime.assert(Boolean(mainContainerElement), "No id of an existing element passed to WebODFEditor.createInstance(): "+mainContainerElementId);
+
+               // create needed tree structure
+                canvasElement = createElement('div', canvasElementId, "webodfeditor-canvas");
+                canvasContainerElement = createElement('div', canvasContainerElementId, "webodfeditor-canvascontainer");
+                toolbarElement = createElement('span', toolbarElementId, "webodfeditor-toolbar");
+                toolbarContainerElement = createElement('span', undefined, "webodfeditor-toolbarcontainer");
+                editorElement = createElement('div', editorElementId, "webodfeditor-editor");
+
+                // put into tree
+                canvasContainerElement.appendChild(canvasElement);
+                toolbarContainerElement.appendChild(toolbarElement);
+                editorElement.appendChild(toolbarContainerElement);
+                editorElement.appendChild(canvasContainerElement);
+                mainContainerElement.appendChild(editorElement);
+
+                if (collabEditing) {
+                    // memberlist plugin
+                    memberListElement = createElement('div', undefined, "webodfeditor-memberList");
+                    membersElement = createElement('div', membersElementId, "webodfeditor-members");
+
+                    // put into tree
+                    membersElement.appendChild(memberListElement);
+                    mainContainerElement.appendChild(membersElement);
+                }
 
                 // App Widgets
-                mainContainer = new BorderContainer({}, 'mainContainer');
+                mainContainer = new BorderContainer({}, mainContainerElementId);
 
                 editorPane = new ContentPane({
                     region: 'center'
-                }, 'editor');
+                }, editorElementId);
                 mainContainer.addChild(editorPane);
 
                 if (collabEditing) {
                     memberListPane = new ContentPane({
                         region: 'right',
                         title: runtime.tr("Members")
-                    }, 'members');
+                    }, membersElementId);
                     mainContainer.addChild(memberListPane);
                     memberListView = new MemberListView(memberListElement);
                 }
 
                 mainContainer.startup();
 
-                if (window.inviteButtonProxy) {
-                    inviteButton = document.getElementById('inviteButton');
-                    runtime.assert(inviteButton, 'missing "inviteButton" div in HTML');
-                    inviteButton.innerText = runtime.tr("Invite Members");
-                    inviteButton.style.display = "block";
-                    inviteButton.onclick = window.inviteButtonProxy.clicked;
-                }
-
-                tools = new Tools({
+                tools = new Tools(toolbarElementId, {
                     onToolDone: setFocusToOdfCanvas,
                     loadOdtFile: loadOdtFile,
                     saveOdtFile: saveOdtFile,
@@ -519,6 +635,13 @@ define("webodf/editor/Editor", [
                     pendingEditorReadyCallback = null;
                     pendingMemberId = null;
                 });
+
+                repositionContainer();
+
+                window.addEventListener('scroll', translateToolbar);
+                window.addEventListener('focusout', translateToolbar);
+                window.addEventListener('touchmove', translateToolbar);
+                window.addEventListener('resize', repositionContainer);
             }
 
             init();
