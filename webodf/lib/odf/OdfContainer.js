@@ -36,7 +36,7 @@
  * @source: https://github.com/kogmbh/WebODF/
  */
 
-/*global Node, NodeFilter, runtime, core, xmldom, odf, DOMParser, document, webodf_version */
+/*global Node, NodeFilter, runtime, core, xmldom, odf, DOMParser, document, webodf_version, XMLHttpRequest, console */
 
 runtime.loadClass("core.Base64");
 runtime.loadClass("core.Zip");
@@ -953,7 +953,7 @@ runtime.loadClass("odf.OdfNodeFilter");
         }
         /**
          * @param {!string} url
-         * @param {!function((string)):undefined} callback
+         * @param {!function((number)):undefined} callback
          * @return {undefined}
          */
         function loadFromXML(url, callback) {
@@ -964,6 +964,26 @@ runtime.loadClass("odf.OdfNodeFilter");
 //                    handleFlatXml(dom);
 //                }
 //            });
+             /**
+             * Request to URL, then handle it.
+             * @param {!string} url
+             * @param {Object.<number, function()>}  statusHandlers
+             */
+            function getAndParse(url, statusHandlers) {
+                var xmlhttp = new XMLHttpRequest(), xmlDoc;
+                xmlhttp.withCredentials = true;
+                xmlhttp.onreadystatechange = function() {
+                    if (statusHandlers[xmlhttp.status]) {
+                        statusHandlers[xmlhttp.status]();
+                    }
+                };
+                xmlhttp.open("GET", url, false);
+                xmlhttp.send();
+                xmlDoc = xmlhttp.responseXML;
+                console.log(xmlDoc);
+                try { handleFlatXml(new DOMParser().parseFromString(xmlDoc.toString(), "TODO: fixme")); }
+                catch(e) { console.log("Couldn't parse doc"); }
+            }
             getAndParse(url, { 404: function() {
 //                var parts = url.split(".");
 //                getAndParse("/doc-templates/blank." + parts[parts.length - 1].split("?")[0], {});
@@ -982,19 +1002,7 @@ runtime.loadClass("odf.OdfNodeFilter");
 //            var xmlDoc = xmlhttp.responseXML;
 //            handleFlatXml(new DOMParser().parseFromString(xmlDoc));
 
-            function getAndParse(url, statusHandlers) {
-                var xmlhttp = new XMLHttpRequest();
-                xmlhttp.withCredentials = true;
-                xmlhttp.onreadystatechange = function() {
-                    if (statusHandlers[xmlhttp.status]) statusHandlers[xmlhttp.status]();
-                };
-                xmlhttp.open("GET", url, false);
-                xmlhttp.send();
-                var xmlDoc = xmlhttp.responseXML;
-                console.log(xmlDoc);
-                try { handleFlatXml(new DOMParser().parseFromString(xmlDoc)); }
-                catch(e) { console.log("Couldn't parse doc", e); }
-            }
+
         }
         // public functions
         this.setRootElement = setRootElement;
@@ -1241,14 +1249,10 @@ runtime.loadClass("odf.OdfNodeFilter");
                 localName: odf.ODFDocumentElement.localName
             })
         );
-
-        // initialize private variables
-        if (url) {
-            loadAsZip(url);
-        } else {
-            zip = createEmptyTextDocument();
-        }
-
+        /**
+         * Load zip file from url
+         * @param {string} url
+         */
         function loadAsZip(url) {
             zip = new core.Zip(url, function (err, zipobject) {
                 zip = zipobject;
@@ -1267,6 +1271,13 @@ runtime.loadClass("odf.OdfNodeFilter");
                 }
             });
         }
+        // initialize private variables
+        if (url) {
+            loadAsZip(url);
+        } else {
+            zip = createEmptyTextDocument();
+        }
+
     };
     odf.OdfContainer.EMPTY = 0;
     odf.OdfContainer.LOADING = 1;
